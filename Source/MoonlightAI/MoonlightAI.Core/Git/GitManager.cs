@@ -1,0 +1,277 @@
+using LibGit2Sharp;
+using Microsoft.Extensions.Logging;
+using MoonlightAI.Core.Configuration;
+using MoonlightAI.Core.Models;
+using Octokit;
+using Credentials = LibGit2Sharp.Credentials;
+using Repository = LibGit2Sharp.Repository;
+using Signature = LibGit2Sharp.Signature;
+
+namespace MoonlightAI.Core.Git;
+
+/// <summary>
+/// Manages git operations and GitHub interactions.
+/// </summary>
+public class GitManager : IGitManager
+{
+    private readonly GitHubConfiguration _config;
+    private readonly ILogger<GitManager> _logger;
+    private readonly GitHubClient _githubClient;
+
+    /// <summary>
+    /// Initializes a new instance of the GitManager class.
+    /// </summary>
+    /// <param name="config">GitHub configuration.</param>
+    /// <param name="logger">Logger instance.</param>
+    public GitManager(GitHubConfiguration config, ILogger<GitManager> logger)
+    {
+        _config = config ?? throw new ArgumentNullException(nameof(config));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+
+        // Initialize GitHub client
+        _githubClient = new GitHubClient(new ProductHeaderValue("MoonlightAI"))
+        {
+            Credentials = new Octokit.Credentials(_config.PersonalAccessToken)
+        };
+    }
+
+    /// <inheritdoc/>
+    public async Task<string> CloneOrPullAsync(RepositoryConfiguration repository, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(repository.RepositoryUrl))
+        {
+            throw new ArgumentException("Repository URL cannot be null or empty.", nameof(repository));
+        }
+
+        // Ensure working directory exists
+        if (!Directory.Exists(_config.WorkingDirectory))
+        {
+            Directory.CreateDirectory(_config.WorkingDirectory);
+            _logger.LogInformation("Created working directory: {WorkingDirectory}", _config.WorkingDirectory);
+        }
+
+        var localPath = Path.Combine(_config.WorkingDirectory, repository.Name);
+        repository.LocalPath = localPath;
+
+        if (Directory.Exists(localPath) && Directory.Exists(Path.Combine(localPath, ".git")))
+        {
+            // Repository exists, pull latest changes
+            _logger.LogInformation("Repository already exists at {LocalPath}, pulling latest changes...", localPath);
+            await Task.Run(() => PullLatestChanges(localPath), cancellationToken);
+        }
+        else
+        {
+            // Clone the repository
+            _logger.LogInformation("Cloning repository {RepositoryUrl} to {LocalPath}...", repository.RepositoryUrl, localPath);
+            await Task.Run(() => CloneRepository(repository.RepositoryUrl, localPath), cancellationToken);
+        }
+
+        return localPath;
+    }
+
+    /// <inheritdoc/>
+    public async Task<IEnumerable<string>> GetExistingPullRequestsAsync(RepositoryConfiguration repository, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            _logger.LogInformation("Fetching open pull requests for {Owner}/{Name}...", repository.Owner, repository.Name);
+
+            var pullRequests = await _githubClient.PullRequest.GetAllForRepository(
+                repository.Owner,
+                repository.Name,
+                new PullRequestRequest { State = ItemStateFilter.Open });
+
+            var branchNames = pullRequests.Select(pr => pr.Head.Ref).ToList();
+
+            _logger.LogInformation("Found {Count} open pull requests", branchNames.Count);
+            return branchNames;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to fetch pull requests for {Owner}/{Name}", repository.Owner, repository.Name);
+            throw;
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<bool> CreateBranchAsync(string repositoryPath, string branchName, CancellationToken cancellationToken = default)
+    {
+        return Task.Run(() =>
+        {
+            try
+            {
+                using var repo = new Repository(repositoryPath);
+
+                // Check if branch already exists
+                var existingBranch = repo.Branches[branchName];
+                if (existingBranch != null)
+                {
+                    _logger.LogWarning("Branch {BranchName} already exists, checking it out", branchName);
+                    Commands.Checkout(repo, existingBranch);
+                    return true;
+                }
+
+                // Create and checkout new branch
+                var branch = repo.CreateBranch(branchName);
+                Commands.Checkout(repo, branch);
+
+                _logger.LogInformation("Created and checked out branch: {BranchName}", branchName);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to create branch {BranchName} in {RepositoryPath}", branchName, repositoryPath);
+                throw;
+            }
+        }, cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public Task CommitChangesAsync(string repositoryPath, string message, CancellationToken cancellationToken = default)
+    {
+        return Task.Run(() =>
+        {
+            try
+            {
+                using var repo = new Repository(repositoryPath);
+
+                // Stage all changes
+                Commands.Stage(repo, "*");
+
+                // Check if there are any changes to commit
+                var status = repo.RetrieveStatus();
+                if (!status.IsDirty)
+                {
+                    _logger.LogInformation("No changes to commit in {RepositoryPath}", repositoryPath);
+                    return;
+                }
+
+                // Create signature
+                var signature = new Signature(_config.UserName, _config.UserEmail, DateTimeOffset.Now);
+
+                // Commit changes
+                var commit = repo.Commit(message, signature, signature);
+
+                _logger.LogInformation("Committed changes: {CommitSha} - {Message}", commit.Sha, message);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to commit changes in {RepositoryPath}", repositoryPath);
+                throw;
+            }
+        }, cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public Task PushBranchAsync(string repositoryPath, string branchName, CancellationToken cancellationToken = default)
+    {
+        return Task.Run(() =>
+        {
+            try
+            {
+                using var repo = new Repository(repositoryPath);
+
+                var branch = repo.Branches[branchName];
+                if (branch == null)
+                {
+                    throw new InvalidOperationException($"Branch {branchName} does not exist");
+                }
+
+                var remote = repo.Network.Remotes["origin"];
+                var options = new PushOptions
+                {
+                    CredentialsProvider = (url, usernameFromUrl, types) =>
+                        new UsernamePasswordCredentials
+                        {
+                            Username = _config.PersonalAccessToken,
+                            Password = string.Empty
+                        }
+                };
+
+                _logger.LogInformation("Pushing branch {BranchName} to remote...", branchName);
+                repo.Network.Push(branch, options);
+
+                _logger.LogInformation("Successfully pushed branch: {BranchName}", branchName);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to push branch {BranchName} in {RepositoryPath}", branchName, repositoryPath);
+                throw;
+            }
+        }, cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public async Task<string> CreatePullRequestAsync(RepositoryConfiguration repository, string branchName, string title, string body, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            _logger.LogInformation("Creating pull request for branch {BranchName} in {Owner}/{Name}...", branchName, repository.Owner, repository.Name);
+
+            var newPr = new NewPullRequest(title, branchName, _config.DefaultBranch)
+            {
+                Body = body
+            };
+
+            var pullRequest = await _githubClient.PullRequest.Create(repository.Owner, repository.Name, newPr);
+
+            _logger.LogInformation("Created pull request #{Number}: {Url}", pullRequest.Number, pullRequest.HtmlUrl);
+            return pullRequest.HtmlUrl;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to create pull request for branch {BranchName}", branchName);
+            throw;
+        }
+    }
+
+    private void CloneRepository(string url, string path)
+    {
+        var options = new CloneOptions();
+        options.FetchOptions.CredentialsProvider = (url, usernameFromUrl, types) =>
+            new UsernamePasswordCredentials
+            {
+                Username = _config.PersonalAccessToken,
+                Password = string.Empty
+            };
+
+        Repository.Clone(url, path, options);
+        _logger.LogInformation("Successfully cloned repository to {Path}", path);
+    }
+
+    private void PullLatestChanges(string repositoryPath)
+    {
+        using var repo = new Repository(repositoryPath);
+
+        // Fetch from remote
+        var remote = repo.Network.Remotes["origin"];
+        var fetchOptions = new FetchOptions
+        {
+            CredentialsProvider = (url, usernameFromUrl, types) =>
+                new UsernamePasswordCredentials
+                {
+                    Username = _config.PersonalAccessToken,
+                    Password = string.Empty
+                }
+        };
+
+        Commands.Fetch(repo, remote.Name, Array.Empty<string>(), fetchOptions, null);
+
+        // Checkout default branch
+        var defaultBranch = repo.Branches[_config.DefaultBranch] ?? repo.Branches.FirstOrDefault();
+        if (defaultBranch != null)
+        {
+            Commands.Checkout(repo, defaultBranch);
+
+            // Pull changes (merge)
+            var signature = new Signature(_config.UserName, _config.UserEmail, DateTimeOffset.Now);
+            var pullOptions = new PullOptions
+            {
+                FetchOptions = fetchOptions
+            };
+
+            Commands.Pull(repo, signature, pullOptions);
+            _logger.LogInformation("Successfully pulled latest changes");
+        }
+    }
+}

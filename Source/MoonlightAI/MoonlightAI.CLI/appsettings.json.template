@@ -1,0 +1,25 @@
+{
+  "AIServer": {
+    "ServerUrl": "http://192.168.4.231:11434",
+    "ModelName": "codellama",
+    "TimeoutSeconds": 300
+  },
+  "GitHub": {
+    "PersonalAccessToken": "your-github-pat-here",
+    "DefaultBranch": "main",
+    "WorkingDirectory": "./repositories",
+    "UserName": "MoonlightAI",
+    "UserEmail": "moonlight@example.com"
+  },
+  "Repositories": [
+    {
+      "RepositoryUrl": "https://github.com/SolutionFamily/solution-family"
+    }
+  ],
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft": "Warning"
+    }
+  }
+}

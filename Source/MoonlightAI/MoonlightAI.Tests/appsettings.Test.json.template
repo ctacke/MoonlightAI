@@ -1,0 +1,7 @@
+{
+  "AIServer": {
+    "ServerUrl": "http://192.168.4.231:11434",
+    "ModelName": "codellama",
+    "TimeoutSeconds": 300
+  }
+}
