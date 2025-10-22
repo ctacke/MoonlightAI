@@ -58,47 +58,60 @@ public class WorkloadOrchestrator
             var lines = string.Join(Environment.NewLine, methodCode);
 
             // generate XML docs for the method using LLM
-            var result = await _aiServer.GenerateMethodXmlDocumentationAsync(lines);
-
-            if (result.Done)
+            try
             {
-                var docSpacing = string.Empty;
+                var result = await _aiServer.GenerateMethodXmlDocumentationAsync(lines);
 
-                var sb = new StringBuilder();
-                // write everything before the method
-                for (var l = 0; l < nextUndocumentedMethod.FirstLineNumber - 1; l++)
+                if (result.Done)
                 {
-                    if (l == 0)
+                    _logger.LogInformation("Doc took {duration}", TimeSpan.FromMicroseconds((double)(result.TotalDuration! / 1000)));
+
+                    var docSpacing = string.Empty;
+
+                    var sb = new StringBuilder();
+                    // write everything before the method
+                    for (var l = 0; l < nextUndocumentedMethod.FirstLineNumber - 1; l++)
                     {
-                        // count spaces before method name so we can insert the same spacing in the doc lines
-                        docSpacing = new string(' ', originalContentLines[nextUndocumentedMethod.FirstLineNumber - 1].TakeWhile(c => c == ' ').Count());
+                        if (l == 0)
+                        {
+                            // count spaces before method name so we can insert the same spacing in the doc lines
+                            docSpacing = new string(' ', originalContentLines[nextUndocumentedMethod.FirstLineNumber - 1].TakeWhile(c => c == ' ').Count());
+                        }
+                        sb.AppendLine(originalContentLines[l]);
                     }
-                    sb.AppendLine(originalContentLines[l]);
+
+                    // write the docs
+                    var docLines = result.Response
+                        .Trim('`')
+                        .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                        .Where(l => l.StartsWith("///"));
+
+                    foreach (var doc in docLines)
+                    {
+                        sb.AppendLine($"{docSpacing}{doc.TrimEnd('\r', '\n')}");
+                    }
+
+                    // write the method code and everything after
+                    for (var l = nextUndocumentedMethod.FirstLineNumber - 1; l < originalContentLines.Length; l++)
+                    {
+                        sb.AppendLine(originalContentLines[l]);
+                    }
+
+                    // back up the original
+                    File.Move(file, file + ".bak", true);
+                    // write the new file
+                    await File.WriteAllTextAsync(file, sb.ToString());
                 }
-
-                // write the docs
-                var docLines = result.Response
-                    .Trim('`')
-                    .Split('\n', StringSplitOptions.RemoveEmptyEntries)
-                    .Where(l => l.StartsWith("///"));
-
-                foreach (var doc in docLines)
-                {
-                    sb.AppendLine($"{docSpacing}{doc.TrimEnd('\r', '\n')}");
-                }
-
-                // write the method code and everything after
-                for (var l = nextUndocumentedMethod.FirstLineNumber - 1; l < originalContentLines.Length; l++)
-                {
-                    sb.AppendLine(originalContentLines[l]);
-                }
-
-                // back up the original
-                File.Move(file, file + ".bak", true);
-                // write the new file
-                await File.WriteAllTextAsync(file, sb.ToString());
+            }
+            catch (TimeoutException)
+            {
+                _logger.LogWarning("AI server timed out generating docs for method {MethodName}", nextUndocumentedMethod.Name);
+                break;
             }
 
+            // TODO: if we timed out, maybe skip that method?
+
+            fileAnalysis = await _codeAnalyzer.AnalyzeFileAsync(file);
             nextUndocumentedMethod = fileAnalysis.Classes
                 .SelectMany(c => c.Methods)
                 .FirstOrDefault(m => m.XmlDocumentation == null);

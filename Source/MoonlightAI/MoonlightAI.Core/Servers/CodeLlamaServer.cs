@@ -46,10 +46,11 @@ public class CodeLlamaServer : IAIServer, IDisposable
             Rules:
             1. Output must begin with "/// <summary>".
             2. Every line must start with "///".
-            3. Do NOT include the method signature or any code.
-            4. Do NOT include <member> tags.
-            5. Do NOT explain, describe, or add any extra text.
-            6. Your entire output must be between <doc> and </doc> markers.
+            3. Document all parameters and return values.
+            4. Do NOT include the method signature or any code.
+            5. Do NOT include <member> tags.
+            6. Do NOT explain, describe, or add any extra text.
+            7. Your entire output must be between <doc> and </doc> markers.
 
             <doc>
             /// ...
