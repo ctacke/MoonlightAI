@@ -1,5 +1,18 @@
 namespace MoonlightAI.Core.Models;
 
+public class RepositoryConfigurations
+{
+    /// <summary>
+    /// Configuration section name.
+    /// </summary>
+    public const string SectionName = "Repositories";
+
+    /// <summary>
+    /// List of repository configurations.
+    /// </summary>
+    public List<RepositoryConfiguration> Repositories { get; set; } = new();
+}
+
 /// <summary>
 /// Configuration for a specific repository to process.
 /// </summary>

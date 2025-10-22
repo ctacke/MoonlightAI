@@ -140,7 +140,7 @@ public class RoslynCodeAnalyzer : ICodeAnalyzer
         publicMembers.AddRange(classInfo.Properties.Where(p => p.Accessibility == "public"));
         publicMembers.AddRange(classInfo.Methods.Where(m => m.Accessibility == "public"));
 
-        return publicMembers.OrderBy(m => m.LineNumber);
+        return publicMembers.OrderBy(m => m.FirstLineNumber);
     }
 
     private ClassInfo AnalyzeClass(ClassDeclarationSyntax classDecl, SyntaxTree syntaxTree)
@@ -218,7 +218,7 @@ public class RoslynCodeAnalyzer : ICodeAnalyzer
             Name = propDecl.Identifier.Text,
             PropertyType = propDecl.Type.ToString(),
             Accessibility = GetAccessibility(propDecl.Modifiers),
-            LineNumber = syntaxTree.GetLineSpan(propDecl.Span).StartLinePosition.Line + 1,
+            FirstLineNumber = syntaxTree.GetLineSpan(propDecl.Span).StartLinePosition.Line + 1,
             XmlDocumentation = GetXmlDocumentation(propDecl),
             HasGetter = propDecl.AccessorList?.Accessors.Any(a => a.IsKind(SyntaxKind.GetAccessorDeclaration)) ?? false,
             HasSetter = propDecl.AccessorList?.Accessors.Any(a => a.IsKind(SyntaxKind.SetAccessorDeclaration) || a.IsKind(SyntaxKind.InitAccessorDeclaration)) ?? false
@@ -232,7 +232,8 @@ public class RoslynCodeAnalyzer : ICodeAnalyzer
             Name = methodDecl.Identifier.Text,
             ReturnType = methodDecl.ReturnType.ToString(),
             Accessibility = GetAccessibility(methodDecl.Modifiers),
-            LineNumber = syntaxTree.GetLineSpan(methodDecl.Span).StartLinePosition.Line + 1,
+            FirstLineNumber = syntaxTree.GetLineSpan(methodDecl.Span).StartLinePosition.Line + 1,
+            LastLineNumber = syntaxTree.GetLineSpan(methodDecl.Span).EndLinePosition.Line + 1,
             XmlDocumentation = GetXmlDocumentation(methodDecl),
             IsAsync = methodDecl.Modifiers.Any(m => m.IsKind(SyntaxKind.AsyncKeyword))
         };

@@ -3,7 +3,6 @@ using Microsoft.Extensions.Logging;
 using MoonlightAI.Core.Configuration;
 using MoonlightAI.Core.Models;
 using Octokit;
-using Credentials = LibGit2Sharp.Credentials;
 using Repository = LibGit2Sharp.Repository;
 using Signature = LibGit2Sharp.Signature;
 

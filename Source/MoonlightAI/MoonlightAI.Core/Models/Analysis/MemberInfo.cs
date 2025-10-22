@@ -21,9 +21,14 @@ public abstract class MemberInfo
     public string? XmlDocumentation { get; set; }
 
     /// <summary>
-    /// Line number where the member is defined.
+    /// First line number where the member is defined.
     /// </summary>
-    public int LineNumber { get; set; }
+    public int FirstLineNumber { get; set; }
+
+    /// <summary>
+    /// Last line number where the member is defined.
+    /// </summary>
+    public int LastLineNumber { get; set; }
 
     /// <summary>
     /// Type of the member (Property, Method, Field, etc).

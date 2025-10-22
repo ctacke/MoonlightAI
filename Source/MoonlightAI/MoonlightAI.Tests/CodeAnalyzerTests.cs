@@ -193,7 +193,7 @@ public class CodeAnalyzerTests
         Assert.All(publicMembers, m => Assert.Equal("public", m.Accessibility));
 
         // Verify they're sorted by line number
-        Assert.True(publicMembers.SequenceEqual(publicMembers.OrderBy(m => m.LineNumber)));
+        Assert.True(publicMembers.SequenceEqual(publicMembers.OrderBy(m => m.FirstLineNumber)));
     }
 
     [Fact]

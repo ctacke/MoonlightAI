@@ -7,6 +7,8 @@ namespace MoonlightAI.Core;
 /// </summary>
 public interface IAIServer
 {
+    Task<AIResponse> GenerateMethodXmlDocumentationAsync(string method, CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Sends a prompt to the AI server and returns the response.
     /// </summary>

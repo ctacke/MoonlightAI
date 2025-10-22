@@ -1,7 +1,7 @@
-using System.Net.Http.Json;
-using System.Text.Json;
 using MoonlightAI.Core.Configuration;
 using MoonlightAI.Core.Models;
+using System.Net.Http.Json;
+using System.Text.Json;
 
 namespace MoonlightAI.Core.Servers;
 
@@ -26,6 +26,37 @@ public class CodeLlamaServer : IAIServer, IDisposable
 
         _httpClient.BaseAddress = new Uri(_configuration.ServerUrl);
         _httpClient.Timeout = TimeSpan.FromSeconds(_configuration.TimeoutSeconds);
+    }
+
+    public Task<AIResponse> GenerateMethodXmlDocumentationAsync(string method, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(method))
+        {
+            throw new ArgumentException("Prompt cannot be null or empty.", nameof(method));
+        }
+
+        // codellama tries to be helpful and returns the method.  this is to try to constrain it to not do that
+        var prompt = $"""
+            Generate XML documentation comments for the following C# method:
+
+            {method}
+
+            Output **only** the XML documentation comment block.
+
+            Rules:
+            1. Output must begin with "/// <summary>".
+            2. Every line must start with "///".
+            3. Do NOT include the method signature or any code.
+            4. Do NOT include <member> tags.
+            5. Do NOT explain, describe, or add any extra text.
+            6. Your entire output must be between <doc> and </doc> markers.
+
+            <doc>
+            /// ...
+            </doc>
+            """;
+
+        return SendPromptAsync(prompt, cancellationToken);
     }
 
     /// <inheritdoc/>
