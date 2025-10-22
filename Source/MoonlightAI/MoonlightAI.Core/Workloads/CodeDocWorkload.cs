@@ -1,8 +1,37 @@
 ﻿namespace MoonlightAI.Core.Workloads;
 
+/// <summary>
+/// Workload for adding XML documentation to a single C# file.
+/// </summary>
 public class CodeDocWorkload : Workload
 {
-    public string RepositoryUrl { get; set; } = string.Empty;
+    /// <summary>
+    /// Path to the solution file (relative to repository root).
+    /// </summary>
     public string SolutionPath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Path to the project file (relative to repository root).
+    /// </summary>
     public string ProjectPath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Path to the specific C# file to document (relative to repository root).
+    /// </summary>
+    public string FilePath { get; set; } = string.Empty;
+
+    /// <inheritdoc/>
+    public override string WorkloadType => "code-documentation";
+
+    public MemberVisibility DocumentVisibility { get; set; } = MemberVisibility.Public;
+
+    /// <summary>
+    /// Gets a more specific branch name including the file being processed.
+    /// </summary>
+    public override string GetBranchName()
+    {
+        var date = DateTime.UtcNow.ToString("yyyyMMdd");
+        var fileName = Path.GetFileNameWithoutExtension(FilePath).ToLowerInvariant();
+        return $"moonlight/{date}-code-doc-{fileName}";
+    }
 }

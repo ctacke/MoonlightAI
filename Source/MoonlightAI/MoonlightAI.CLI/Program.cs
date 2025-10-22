@@ -9,6 +9,7 @@ using MoonlightAI.Core.Models;
 using MoonlightAI.Core.Orchestration;
 using MoonlightAI.Core.Servers;
 using MoonlightAI.Core.Workloads;
+using MoonlightAI.Core.Workloads.Runners;
 
 // Build configuration
 var configuration = new ConfigurationBuilder()
@@ -49,6 +50,7 @@ services.AddSingleton<WorkloadOrchestrator>();
 services.AddSingleton<GitManager>();
 services.AddSingleton<RepositoryManager>();
 services.AddSingleton<RoslynCodeAnalyzer>();
+services.AddSingleton<CodeDocWorkloadRunner>();
 
 // Build service provider
 var serviceProvider = services.BuildServiceProvider();
@@ -79,7 +81,7 @@ try
         };
 
         var orchestrator = serviceProvider.GetRequiredService<WorkloadOrchestrator>();
-        await orchestrator.EnqueueWorkload(workload);
+        await orchestrator.ExecuteWorkloadAsync(workload);
 
     }
     else
