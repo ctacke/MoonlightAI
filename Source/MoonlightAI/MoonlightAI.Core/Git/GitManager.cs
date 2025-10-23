@@ -101,6 +101,30 @@ public class GitManager : IGitManager
             {
                 using var repo = new Repository(repositoryPath);
 
+                // Check for uncommitted changes and reset them
+                var status = repo.RetrieveStatus();
+                if (status.IsDirty)
+                {
+                    _logger.LogWarning("Working directory has uncommitted changes. Resetting to clean state before creating branch.");
+
+                    // Reset all changes to match HEAD
+                    repo.Reset(ResetMode.Hard);
+
+                    // Clean untracked files
+                    var untrackedFiles = status.Untracked.Select(item => item.FilePath).ToList();
+                    foreach (var file in untrackedFiles)
+                    {
+                        var fullPath = Path.Combine(repositoryPath, file);
+                        if (File.Exists(fullPath))
+                        {
+                            File.Delete(fullPath);
+                            _logger.LogDebug("Deleted untracked file: {FilePath}", file);
+                        }
+                    }
+
+                    _logger.LogInformation("Reset working directory to clean state");
+                }
+
                 // Check if branch already exists
                 var existingBranch = repo.Branches[branchName];
                 if (existingBranch != null)
@@ -259,6 +283,30 @@ public class GitManager : IGitManager
     private void PullLatestChanges(string repositoryPath)
     {
         using var repo = new Repository(repositoryPath);
+
+        // Check for uncommitted changes and reset them
+        var status = repo.RetrieveStatus();
+        if (status.IsDirty)
+        {
+            _logger.LogWarning("Working directory has uncommitted changes. Resetting to clean state before pulling.");
+
+            // Reset all changes to match HEAD
+            repo.Reset(ResetMode.Hard);
+
+            // Clean untracked files
+            var untrackedFiles = status.Untracked.Select(item => item.FilePath).ToList();
+            foreach (var file in untrackedFiles)
+            {
+                var fullPath = Path.Combine(repositoryPath, file);
+                if (File.Exists(fullPath))
+                {
+                    File.Delete(fullPath);
+                    _logger.LogDebug("Deleted untracked file: {FilePath}", file);
+                }
+            }
+
+            _logger.LogInformation("Reset working directory to clean state");
+        }
 
         // Fetch from remote
         var remote = repo.Network.Remotes["origin"];

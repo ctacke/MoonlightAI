@@ -1,8 +1,17 @@
 {
   "AIServer": {
     "ServerUrl": "http://192.168.4.231:11434",
-    "ModelName": "codellama",
+    "ModelName": "codellama:13b-instruct",
     "TimeoutSeconds": 300
+  },
+  "Container": {
+    "UseLocalContainer": false,
+    "ImageName": "moonlight-llm-server",
+    "ContainerName": "moonlight-llm-server",
+    "HostPort": 11434,
+    "AutoStart": true,
+    "AutoStop": true,
+    "PruneAfterStop": true
   },
   "GitHub": {
     "PersonalAccessToken": "your-github-pat-here",
@@ -13,7 +22,7 @@
   },
   "Repositories": [
     {
-      "RepositoryUrl": "https://github.com/SolutionFamily/solution-family"
+      "RepositoryUrl": "https://github.com/MyOrg/MyRepo"
     }
   ],
   "Logging": {

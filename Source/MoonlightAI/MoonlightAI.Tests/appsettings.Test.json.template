@@ -3,5 +3,14 @@
     "ServerUrl": "http://192.168.4.231:11434",
     "ModelName": "codellama",
     "TimeoutSeconds": 300
+  },
+  "Container": {
+    "UseLocalContainer": false,
+    "ImageName": "moonlight-llm-server",
+    "ContainerName": "moonlight-llm-server",
+    "HostPort": 11434,
+    "AutoStart": true,
+    "AutoStop": true,
+    "PruneAfterStop": true
   }
 }

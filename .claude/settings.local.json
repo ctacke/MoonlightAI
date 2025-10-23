@@ -4,7 +4,8 @@
       "Bash(find:*)",
       "Bash(dotnet new:*)",
       "Bash(dotnet sln:*)",
-      "Bash(dotnet build:*)"
+      "Bash(dotnet build:*)",
+      "Bash(docker ps:*)"
     ],
     "deny": [],
     "ask": []

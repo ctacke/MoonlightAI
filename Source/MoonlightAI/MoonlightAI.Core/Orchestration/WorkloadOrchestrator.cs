@@ -1,4 +1,6 @@
 using Microsoft.Extensions.Logging;
+using MoonlightAI.Core.Configuration;
+using MoonlightAI.Core.Containerization;
 using MoonlightAI.Core.Git;
 using MoonlightAI.Core.Models;
 using MoonlightAI.Core.Workloads;
@@ -7,26 +9,35 @@ using MoonlightAI.Core.Workloads.Runners;
 namespace MoonlightAI.Core.Orchestration;
 
 /// <summary>
-/// Orchestrates workload execution with git operations.
+/// Orchestrates workload execution with git operations and container management.
 /// </summary>
 public class WorkloadOrchestrator
 {
     private readonly ILogger<WorkloadOrchestrator> _logger;
     private readonly GitManager _gitManager;
     private readonly CodeDocWorkloadRunner _codeDocRunner;
+    private readonly IContainerManager _containerManager;
+    private readonly IAIServer _aiServer;
+    private readonly AIServerConfiguration _aiServerConfig;
 
     public WorkloadOrchestrator(
         ILogger<WorkloadOrchestrator> logger,
         GitManager gitManager,
-        CodeDocWorkloadRunner codeDocRunner)
+        CodeDocWorkloadRunner codeDocRunner,
+        IContainerManager containerManager,
+        IAIServer aiServer,
+        AIServerConfiguration aiServerConfig)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _gitManager = gitManager ?? throw new ArgumentNullException(nameof(gitManager));
         _codeDocRunner = codeDocRunner ?? throw new ArgumentNullException(nameof(codeDocRunner));
+        _containerManager = containerManager ?? throw new ArgumentNullException(nameof(containerManager));
+        _aiServer = aiServer ?? throw new ArgumentNullException(nameof(aiServer));
+        _aiServerConfig = aiServerConfig ?? throw new ArgumentNullException(nameof(aiServerConfig));
     }
 
     /// <summary>
-    /// Executes a code documentation workload with full git workflow.
+    /// Executes a code documentation workload with full git workflow and container management.
     /// </summary>
     public async Task<WorkloadResult> ExecuteWorkloadAsync(CodeDocWorkload workload, CancellationToken cancellationToken = default)
     {
@@ -37,6 +48,48 @@ public class WorkloadOrchestrator
 
         try
         {
+            // Step 0: Ensure container is running if configured
+            _logger.LogInformation("Step 0: Ensuring AI container is running...");
+            var containerReady = await _containerManager.EnsureContainerRunningAsync(cancellationToken);
+            if (!containerReady)
+            {
+                _logger.LogError("AI container is not running and could not be started");
+                return new WorkloadResult
+                {
+                    Workload = workload,
+                    State = WorkloadState.Failed,
+                    Summary = "AI container is not running and could not be started"
+                };
+            }
+
+            // Step 0.5: Wait for AI server to be healthy with retries
+            _logger.LogInformation("Step 0.5: Verifying AI server health...");
+            var serverHealthy = await WaitForAIServerHealthAsync(cancellationToken);
+            if (!serverHealthy)
+            {
+                _logger.LogError("AI server is not responding after multiple health check attempts");
+                return new WorkloadResult
+                {
+                    Workload = workload,
+                    State = WorkloadState.Failed,
+                    Summary = "AI server is not responding to health checks"
+                };
+            }
+
+            // Step 0.6: Verify AI model is available
+            _logger.LogInformation("Step 0.6: Verifying AI model availability...");
+            var modelValidation = await ValidateModelAvailabilityAsync(cancellationToken);
+            if (!modelValidation.IsValid)
+            {
+                _logger.LogError("AI model validation failed: {Error}", modelValidation.ErrorMessage);
+                return new WorkloadResult
+                {
+                    Workload = workload,
+                    State = WorkloadState.Failed,
+                    Summary = modelValidation.ErrorMessage
+                };
+            }
+
             // Step 1: Clone or pull the repository
             var repoConfig = new RepositoryConfiguration
             {
@@ -134,5 +187,252 @@ public class WorkloadOrchestrator
                 Summary = $"Orchestration failed: {ex.Message}"
             };
         }
+    }
+
+    /// <summary>
+    /// Executes multiple workloads sequentially on a single git branch and manages container lifecycle.
+    /// </summary>
+    public async Task<BatchWorkloadResult> ExecuteWorkloadsAsync(
+        IEnumerable<CodeDocWorkload> workloads,
+        CancellationToken cancellationToken = default)
+    {
+        var workloadList = workloads.ToList();
+        var results = new List<WorkloadResult>();
+        var batchResult = new BatchWorkloadResult { WorkloadResults = results };
+
+        _logger.LogInformation("Starting batch workload execution for {Count} workloads", workloadList.Count);
+
+        try
+        {
+            // Step 0: Ensure container is running
+            _logger.LogInformation("Step 0: Ensuring AI container is running...");
+            var containerReady = await _containerManager.EnsureContainerRunningAsync(cancellationToken);
+            if (!containerReady)
+            {
+                _logger.LogError("AI container is not running and could not be started");
+                batchResult.Success = false;
+                batchResult.Summary = "AI container is not running and could not be started";
+                return batchResult;
+            }
+
+            // Step 0.5: Wait for AI server health
+            _logger.LogInformation("Step 0.5: Verifying AI server health...");
+            var serverHealthy = await WaitForAIServerHealthAsync(cancellationToken);
+            if (!serverHealthy)
+            {
+                _logger.LogError("AI server is not responding");
+                batchResult.Success = false;
+                batchResult.Summary = "AI server is not responding to health checks";
+                return batchResult;
+            }
+
+            // Step 0.6: Verify model availability
+            _logger.LogInformation("Step 0.6: Verifying AI model availability...");
+            var modelValidation = await ValidateModelAvailabilityAsync(cancellationToken);
+            if (!modelValidation.IsValid)
+            {
+                _logger.LogError("AI model validation failed");
+                batchResult.Success = false;
+                batchResult.Summary = modelValidation.ErrorMessage;
+                return batchResult;
+            }
+
+            // Group workloads by repository
+            var workloadsByRepo = workloadList.GroupBy(w => w.RepositoryUrl).ToList();
+
+            foreach (var repoGroup in workloadsByRepo)
+            {
+                var repositoryUrl = repoGroup.Key;
+                var repoWorkloads = repoGroup.ToList();
+
+                _logger.LogInformation("Processing {Count} workloads for repository {RepositoryUrl}", repoWorkloads.Count, repositoryUrl);
+
+                // Step 1: Clone or pull repository
+                var repoConfig = new RepositoryConfiguration { RepositoryUrl = repositoryUrl };
+                _logger.LogInformation("Step 1: Cloning/pulling repository...");
+                var repositoryPath = await _gitManager.CloneOrPullAsync(repoConfig, cancellationToken);
+
+                // Step 2: Create single branch for all workloads in this repo
+                var branchName = $"moonlight/{DateTime.UtcNow:yyyy-MM-dd}-batch";
+                _logger.LogInformation("Step 2: Creating branch {BranchName}...", branchName);
+
+                var existingPRs = await _gitManager.GetExistingPullRequestsAsync(repoConfig, cancellationToken);
+                if (existingPRs.Contains(branchName))
+                {
+                    _logger.LogWarning("PR already exists for branch {BranchName}, skipping repository", branchName);
+                    continue;
+                }
+
+                await _gitManager.CreateBranchAsync(repositoryPath, branchName, cancellationToken);
+
+                var allModifiedFiles = new List<string>();
+                var successfulWorkloads = 0;
+
+                // Step 3: Execute all workloads for this repository
+                foreach (var workload in repoWorkloads)
+                {
+                    try
+                    {
+                        _logger.LogInformation("Executing workload: {WorkloadType}", workload.WorkloadType);
+                        var result = await _codeDocRunner.ExecuteAsync(workload, repositoryPath, cancellationToken);
+                        result.BranchName = branchName;
+                        results.Add(result);
+
+                        if (result.IsSuccess && result.ModifiedFiles.Any())
+                        {
+                            allModifiedFiles.AddRange(result.ModifiedFiles);
+                            successfulWorkloads++;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Error executing workload");
+                        results.Add(new WorkloadResult
+                        {
+                            Workload = workload,
+                            State = WorkloadState.Failed,
+                            Summary = $"Workload execution failed: {ex.Message}"
+                        });
+                    }
+                }
+
+                // Step 4: Commit all changes if any workloads succeeded
+                if (allModifiedFiles.Any())
+                {
+                    _logger.LogInformation("Step 4: Committing {Count} modified files from {SuccessCount} workloads",
+                        allModifiedFiles.Distinct().Count(), successfulWorkloads);
+
+                    var commitMessage = $"MoonlightAI batch run - {DateTime.UtcNow:yyyy-MM-dd}\n\n" +
+                                      $"Processed {successfulWorkloads} workload(s)\n" +
+                                      $"Modified {allModifiedFiles.Distinct().Count()} file(s)";
+
+                    await _gitManager.CommitChangesAsync(repositoryPath, commitMessage, allModifiedFiles.Distinct(), cancellationToken);
+
+                    _logger.LogInformation("Step 5: Pushing branch...");
+                    await _gitManager.PushBranchAsync(repositoryPath, branchName, cancellationToken);
+
+                    _logger.LogInformation("Step 6: Creating pull request...");
+                    var prTitle = $"MoonlightAI Batch Update - {DateTime.UtcNow:yyyy-MM-dd}";
+                    var prBody = $"Automated changes from MoonlightAI batch run\n\n" +
+                                $"**Workloads completed:** {successfulWorkloads}/{repoWorkloads.Count}\n" +
+                                $"**Files modified:** {allModifiedFiles.Distinct().Count()}\n";
+
+                    var prUrl = await _gitManager.CreatePullRequestAsync(repoConfig, branchName, prTitle, prBody, cancellationToken);
+                    batchResult.PullRequestUrl = prUrl;
+
+                    _logger.LogInformation("Batch workload completed successfully. PR: {PrUrl}", prUrl);
+                }
+                else
+                {
+                    _logger.LogInformation("No files were modified, skipping commit and PR");
+                }
+            }
+
+            batchResult.Success = results.Any(r => r.IsSuccess);
+            batchResult.Summary = $"Completed {results.Count(r => r.IsSuccess)}/{results.Count} workloads";
+            return batchResult;
+        }
+        finally
+        {
+            // Clean up container after all workloads complete
+            _logger.LogInformation("All workloads completed. Cleaning up AI container...");
+            await _containerManager.CleanupContainerAsync(cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Result of a batch workload execution.
+    /// </summary>
+    public class BatchWorkloadResult
+    {
+        public bool Success { get; set; }
+        public string Summary { get; set; } = string.Empty;
+        public string? PullRequestUrl { get; set; }
+        public List<WorkloadResult> WorkloadResults { get; set; } = new();
+    }
+
+    /// <summary>
+    /// Waits for the AI server to become healthy with retries.
+    /// </summary>
+    private async Task<bool> WaitForAIServerHealthAsync(CancellationToken cancellationToken, int maxAttempts = 10, int delaySeconds = 3)
+    {
+        for (int attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            try
+            {
+                _logger.LogDebug("Health check attempt {Attempt}/{MaxAttempts}", attempt, maxAttempts);
+                var isHealthy = await _aiServer.HealthCheckAsync(cancellationToken);
+
+                if (isHealthy)
+                {
+                    _logger.LogInformation("AI server is healthy and ready");
+                    return true;
+                }
+
+                _logger.LogWarning("AI server health check failed on attempt {Attempt}/{MaxAttempts}", attempt, maxAttempts);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Exception during health check attempt {Attempt}/{MaxAttempts}", attempt, maxAttempts);
+            }
+
+            if (attempt < maxAttempts)
+            {
+                _logger.LogDebug("Waiting {DelaySeconds} seconds before next health check attempt", delaySeconds);
+                await Task.Delay(TimeSpan.FromSeconds(delaySeconds), cancellationToken);
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Validates that the configured AI model is available on the server.
+    /// </summary>
+    private async Task<ModelValidationResult> ValidateModelAvailabilityAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Try a simple test prompt to validate the model
+            _logger.LogDebug("Testing model '{ModelName}' availability", _aiServerConfig.ModelName);
+
+            var testResponse = await _aiServer.SendPromptAsync("test", cancellationToken);
+
+            _logger.LogInformation("Model '{ModelName}' is available and responding", _aiServerConfig.ModelName);
+            return new ModelValidationResult { IsValid = true };
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("not found"))
+        {
+            // Model not found - provide helpful error message
+            var errorMessage = $"AI model '{_aiServerConfig.ModelName}' is not available on the server. " +
+                              $"Please check your configuration or pull the model using: ollama pull {_aiServerConfig.ModelName}";
+
+            _logger.LogError(errorMessage);
+            return new ModelValidationResult
+            {
+                IsValid = false,
+                ErrorMessage = errorMessage
+            };
+        }
+        catch (Exception ex)
+        {
+            // Other errors during validation
+            var errorMessage = $"Failed to validate AI model availability: {ex.Message}";
+            _logger.LogError(ex, "Model validation failed");
+            return new ModelValidationResult
+            {
+                IsValid = false,
+                ErrorMessage = errorMessage
+            };
+        }
+    }
+
+    /// <summary>
+    /// Result of model validation check.
+    /// </summary>
+    private class ModelValidationResult
+    {
+        public bool IsValid { get; set; }
+        public string ErrorMessage { get; set; } = string.Empty;
     }
 }

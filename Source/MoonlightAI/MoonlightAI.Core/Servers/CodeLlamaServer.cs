@@ -78,7 +78,19 @@ public class CodeLlamaServer : IAIServer, IDisposable
             };
 
             var response = await _httpClient.PostAsJsonAsync("/api/generate", request, cancellationToken);
-            response.EnsureSuccessStatusCode();
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
+                if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+                {
+                    throw new InvalidOperationException(
+                        $"Model '{_configuration.ModelName}' not found on AI server. " +
+                        $"Please ensure the model is pulled. Error: {errorContent}");
+                }
+                throw new HttpRequestException(
+                    $"AI server returned {response.StatusCode}: {errorContent}");
+            }
 
             var aiResponse = await response.Content.ReadFromJsonAsync<AIResponse>(cancellationToken);
 

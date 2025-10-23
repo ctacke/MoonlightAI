@@ -276,20 +276,23 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
             return false;
         }
 
-        // Validate the documentation matches the method signature
-        var validationErrors = ValidateDocumentation(method, docLines);
-        if (validationErrors.Any())
+        // Validate and clean the documentation
+        var cleanedDocLines = SanitizeDocumentation(method, docLines);
+        if (cleanedDocLines.Count == 0)
         {
-            _logger.LogWarning("Generated documentation has validation errors for method {MethodName}: {Errors}",
-                method.Name, string.Join(", ", validationErrors));
+            _logger.LogWarning("No valid documentation lines remain after sanitization for method {MethodName}",
+                method.Name);
 
             // Save prompt and response for debugging
             await SaveFailedDocumentationAttemptAsync(filePath, method.Name, methodSource,
-                $"VALIDATION ERRORS:\n{string.Join("\n", validationErrors)}\n\nGENERATED DOCUMENTATION:\n{string.Join("\n", docLines)}\n\nAI RESPONSE:\n{aiResponse.Response}",
+                $"All documentation removed during sanitization\n\nORIGINAL DOCUMENTATION:\n{string.Join("\n", docLines)}\n\nAI RESPONSE:\n{aiResponse.Response}",
                 cancellationToken);
 
             return false;
         }
+
+        // Use the sanitized documentation
+        docLines = cleanedDocLines;
 
         // Build new file content
         var sb = new StringBuilder();
@@ -393,51 +396,74 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
         return body;
     }
 
-    private List<string> ValidateDocumentation(Models.Analysis.MethodInfo method, List<string> docLines)
+    /// <summary>
+    /// Sanitizes documentation by removing invalid tags while keeping valid content.
+    /// </summary>
+    private List<string> SanitizeDocumentation(Models.Analysis.MethodInfo method, List<string> docLines)
     {
-        var errors = new List<string>();
-        var docText = string.Join("\n", docLines);
-
-        // Check for <returns> tag on void methods
+        var sanitizedLines = new List<string>();
+        var actualParamNames = method.Parameters.Select(p => p.Name).ToHashSet();
         var isVoidMethod = method.ReturnType.Equals("void", StringComparison.OrdinalIgnoreCase) ||
                            method.ReturnType.Equals("Task", StringComparison.OrdinalIgnoreCase);
 
-        if (isVoidMethod && docText.Contains("<returns>"))
+        var warningsLogged = new List<string>();
+
+        foreach (var line in docLines)
         {
-            errors.Add($"Method returns {method.ReturnType} but documentation includes <returns> tag");
-        }
+            var trimmedLine = line.Trim();
 
-        // Check for missing <returns> tag on non-void methods
-        if (!isVoidMethod && !docText.Contains("<returns>"))
-        {
-            errors.Add($"Method returns {method.ReturnType} but documentation is missing <returns> tag");
-        }
-
-        // Check for documented parameters that don't exist
-        var documentedParams = System.Text.RegularExpressions.Regex.Matches(docText, @"<param name=""([^""]+)"">")
-            .Select(m => m.Groups[1].Value)
-            .ToList();
-
-        var actualParamNames = method.Parameters.Select(p => p.Name).ToHashSet();
-
-        foreach (var docParam in documentedParams)
-        {
-            if (!actualParamNames.Contains(docParam))
+            // Check for <returns> tag on void methods - strip it out
+            if (isVoidMethod && trimmedLine.Contains("<returns>"))
             {
-                errors.Add($"Documentation includes parameter '{docParam}' which does not exist in method signature");
+                var warning = $"Stripped <returns> tag from void method {method.ReturnType}";
+                if (!warningsLogged.Contains(warning))
+                {
+                    _logger.LogWarning(warning);
+                    warningsLogged.Add(warning);
+                }
+                continue; // Skip this line
             }
+
+            // Check for hallucinated parameters - strip them out
+            var paramMatch = System.Text.RegularExpressions.Regex.Match(trimmedLine, @"<param name=""([^""]+)"">");
+            if (paramMatch.Success)
+            {
+                var paramName = paramMatch.Groups[1].Value;
+                if (!actualParamNames.Contains(paramName))
+                {
+                    var warning = $"Stripped invalid parameter '{paramName}' from documentation";
+                    if (!warningsLogged.Contains(warning))
+                    {
+                        _logger.LogWarning(warning);
+                        warningsLogged.Add(warning);
+                    }
+                    continue; // Skip this line
+                }
+            }
+
+            // Keep valid lines
+            sanitizedLines.Add(line);
         }
 
-        // Check for missing parameter documentation
+        // Log warnings for missing documentation (but don't strip anything)
+        if (!isVoidMethod && !string.Join("\n", sanitizedLines).Contains("<returns>"))
+        {
+            _logger.LogWarning("Method returns {ReturnType} but documentation is missing <returns> tag (will be kept anyway)", method.ReturnType);
+        }
+
+        var documentedParams = System.Text.RegularExpressions.Regex.Matches(string.Join("\n", sanitizedLines), @"<param name=""([^""]+)"">")
+            .Select(m => m.Groups[1].Value)
+            .ToHashSet();
+
         foreach (var param in method.Parameters)
         {
             if (!documentedParams.Contains(param.Name))
             {
-                errors.Add($"Method has parameter '{param.Name}' which is not documented");
+                _logger.LogWarning("Parameter '{ParamName}' is not documented (will be kept anyway)", param.Name);
             }
         }
 
-        return errors;
+        return sanitizedLines;
     }
 
     private async Task SaveFailedDocumentationAttemptAsync(

@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using MoonlightAI.Core;
 using MoonlightAI.Core.Analysis;
 using MoonlightAI.Core.Configuration;
+using MoonlightAI.Core.Containerization;
 using MoonlightAI.Core.Git;
 using MoonlightAI.Core.Models;
 using MoonlightAI.Core.Orchestration;
@@ -43,8 +44,16 @@ var repoConfig = new RepositoryConfigurations();
 configuration.GetSection(RepositoryConfigurations.SectionName).Bind(repoConfig);
 services.AddSingleton(repoConfig);
 
+// Bind Container configuration
+var containerConfig = new ContainerConfiguration();
+configuration.GetSection(ContainerConfiguration.SectionName).Bind(containerConfig);
+services.AddSingleton(containerConfig);
+
 // Register HttpClient and AI Server
 services.AddHttpClient<IAIServer, CodeLlamaServer>();
+
+// Register Container Manager
+services.AddSingleton<IContainerManager, DockerContainerManager>();
 
 services.AddSingleton<WorkloadOrchestrator>();
 services.AddSingleton<GitManager>();
@@ -59,35 +68,20 @@ var serviceProvider = services.BuildServiceProvider();
 try
 {
     var logger = serviceProvider.GetRequiredService<ILogger<Program>>();
-    var aiServer = serviceProvider.GetRequiredService<IAIServer>();
 
     logger.LogInformation("MoonlightAI starting...");
     logger.LogInformation("AI Server URL: {ServerUrl}", aiServerConfig.ServerUrl);
     logger.LogInformation("Model: {ModelName}", aiServerConfig.ModelName);
 
-    // Test health check
-    logger.LogInformation("Performing health check...");
-    var isHealthy = await aiServer.HealthCheckAsync();
-
-    if (isHealthy)
+    var workload = new CodeDocWorkload
     {
-        logger.LogInformation("AI Server is healthy and reachable.");
+        SolutionPath = @"src\SolutionEngine.slnx",
+        ProjectPath = @"src\Engine\Modules\MQTT\SolutionEngine.MQTT.Module\SolutionEngine.MQTT.Module.csproj",
+        RepositoryUrl = "https://github.com/LECS-Energy-LLC/solution-family"
+    };
 
-        var workload = new CodeDocWorkload
-        {
-            SolutionPath = @"src\SolutionEngine.slnx",
-            ProjectPath = @"src\Engine\Modules\MQTT\SolutionEngine.MQTT.Module\SolutionEngine.MQTT.Module.csproj",
-            RepositoryUrl = "https://github.com/LECS-Energy-LLC/solution-family"
-        };
-
-        var orchestrator = serviceProvider.GetRequiredService<WorkloadOrchestrator>();
-        await orchestrator.ExecuteWorkloadAsync(workload);
-
-    }
-    else
-    {
-        logger.LogWarning("AI Server health check failed. Server may be unreachable.");
-    }
+    var orchestrator = serviceProvider.GetRequiredService<WorkloadOrchestrator>();
+    await orchestrator.ExecuteWorkloadAsync(workload);
 }
 catch (Exception ex)
 {

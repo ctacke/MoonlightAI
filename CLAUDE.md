@@ -71,6 +71,20 @@ Key files:
 - `MoonlightAI.Core/Models/RepositoryConfiguration.cs` - Repository model with URL parsing
 - `MoonlightAI.Core/Configuration/GitHubConfiguration.cs` - GitHub settings
 
+**Docker Container Management** (✓ Implemented)
+- Interface-based design with `IContainerManager` for Docker lifecycle management
+- `DockerContainerManager` implementation for managing local AI server containers
+- Auto-start container before workloads if configured
+- Auto-stop and prune container after workloads complete to save resources
+- Health checks to ensure container is running before executing workloads
+- Configuration-driven with `ContainerConfiguration`
+
+Key files:
+- `MoonlightAI.Core/Containerization/IContainerManager.cs` - Container manager interface
+- `MoonlightAI.Core/Containerization/DockerContainerManager.cs` - Docker implementation
+- `MoonlightAI.Core/Containerization/Dockerfile` - Docker image definition for CodeLlama
+- `MoonlightAI.Core/Configuration/ContainerConfiguration.cs` - Configuration model
+
 ### Planned Component Architecture
 
 The system is designed around several key managers that orchestrate the AI-powered workflow:
@@ -159,6 +173,43 @@ Configuration is managed through `appsettings.json` files. **IMPORTANT**: These 
   ]
 }
 ```
+
+### Container Configuration
+
+MoonlightAI can automatically manage a local Docker container for the AI server.
+
+```json
+{
+  "Container": {
+    "UseLocalContainer": false,
+    "ContainerName": "moonlight-llm-server",
+    "AutoStart": true,
+    "AutoStop": true,
+    "PruneAfterStop": true
+  }
+}
+```
+
+**Container Configuration Options**:
+- `UseLocalContainer`: Enable local Docker container management (default: false)
+- `ContainerName`: Name of the Docker container to manage (default: "moonlight-llm-server")
+- `AutoStart`: Automatically start the container before workloads if not running (default: true)
+- `AutoStop`: Automatically stop the container after all workloads complete (default: true)
+- `PruneAfterStop`: Prune stopped containers after stopping to save resources (default: true)
+
+**Container Workflow**:
+1. Before executing workloads, MoonlightAI checks if the container is running
+2. If `AutoStart` is enabled and the container is not running, it starts the container
+3. After all workloads complete, if `AutoStop` is enabled, the container is stopped
+4. If `PruneAfterStop` is enabled, Docker prune is run to reclaim resources
+
+**Building the Container**:
+```bash
+cd Source/MoonlightAI/MoonlightAI.Core/Containerization
+docker build -t moonlight-llm-server .
+```
+
+The Dockerfile uses the Ollama base image and pre-pulls the CodeLlama 13b-instruct model.
 
 Environment-specific overrides can be placed in `appsettings.Development.json`.
 
