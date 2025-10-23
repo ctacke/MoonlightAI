@@ -419,3 +419,7 @@ FodyWeavers.xsd
 
 # Ignore appsettings files
 appsettings*.json
+
+# MoonlightAI debug files
+**/.moonlight-debug/
+*.bak

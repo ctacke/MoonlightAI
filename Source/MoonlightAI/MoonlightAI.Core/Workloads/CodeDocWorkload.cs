@@ -24,26 +24,4 @@ public class CodeDocWorkload : Workload
     public override string WorkloadType => "code-documentation";
 
     public MemberVisibility DocumentVisibility { get; set; } = MemberVisibility.Public;
-
-    /// <summary>
-    /// Gets a more specific branch name including the file being processed.
-    /// </summary>
-    public override string GetBranchName()
-    {
-        var date = DateTime.UtcNow.ToString("yyyyMMdd");
-
-        if (string.IsNullOrWhiteSpace(FilePath))
-        {
-            throw new InvalidOperationException("FilePath must be set before generating branch name");
-        }
-
-        var fileName = Path.GetFileNameWithoutExtension(FilePath).ToLowerInvariant();
-
-        if (string.IsNullOrWhiteSpace(fileName))
-        {
-            throw new InvalidOperationException($"Could not extract filename from FilePath: {FilePath}");
-        }
-
-        return $"moonlight/{date}-code-doc-{fileName}";
-    }
 }

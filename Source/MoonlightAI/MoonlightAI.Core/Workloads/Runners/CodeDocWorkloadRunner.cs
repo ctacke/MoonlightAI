@@ -115,6 +115,7 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
     private async Task<bool> ProcessFileAsync(string filePath, CodeDocWorkload workload, CancellationToken cancellationToken)
     {
         var fileModified = false;
+        var failedMembers = new HashSet<string>(); // Track members that failed to document
 
         // Keep processing until no more undocumented members are found
         while (true)
@@ -134,7 +135,8 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
             {
                 // Process methods - document one at a time
                 var undocumentedMethod = classInfo.Methods
-                    .FirstOrDefault(m => ShouldDocument(m.Accessibility, workload.DocumentVisibility) && m.XmlDocumentation == null);
+                    .Where(m => ShouldDocument(m.Accessibility, workload.DocumentVisibility) && m.XmlDocumentation == null)
+                    .FirstOrDefault(m => !failedMembers.Contains($"{classInfo.Name}.{m.Name}"));
 
                 if (undocumentedMethod != null)
                 {
@@ -148,12 +150,26 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
                             workload.Statistics.ItemsModified++;
                             break; // Break out to re-analyze with fresh line numbers
                         }
+                        else
+                        {
+                            // AI failed to generate valid documentation, mark as failed and continue
+                            var memberKey = $"{classInfo.Name}.{undocumentedMethod.Name}";
+                            failedMembers.Add(memberKey);
+                            workload.Statistics.ErrorCount++;
+                            workload.Statistics.Errors.Add($"Failed to generate documentation: {memberKey}");
+                            documentedSomething = true; // Continue processing other members
+                            break; // Break to re-analyze
+                        }
                     }
                     catch (TimeoutException)
                     {
+                        var memberKey = $"{classInfo.Name}.{undocumentedMethod.Name}";
                         _logger.LogWarning("AI server timed out for method {MethodName} in {FilePath}", undocumentedMethod.Name, filePath);
+                        failedMembers.Add(memberKey);
                         workload.Statistics.ErrorCount++;
-                        workload.Statistics.Errors.Add($"Timeout: {classInfo.Name}.{undocumentedMethod.Name}");
+                        workload.Statistics.Errors.Add($"Timeout: {memberKey}");
+                        documentedSomething = true; // Continue processing other members
+                        break; // Break to re-analyze
                     }
                 }
 
@@ -229,17 +245,49 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
         // Calculate indentation
         var indentation = new string(' ', originalContentLines[method.FirstLineNumber - 1].TakeWhile(c => c == ' ').Count());
 
+        // Parse and clean documentation lines - try to extract from various formats
+        var response = aiResponse.Response.Trim();
+
+        // Try to extract documentation from <doc> tags if present
+        var docMatch = System.Text.RegularExpressions.Regex.Match(response, @"<doc>\s*(.*?)\s*</doc>",
+            System.Text.RegularExpressions.RegexOptions.Singleline);
+        if (docMatch.Success)
+        {
+            response = docMatch.Groups[1].Value;
+        }
+
         // Parse and clean documentation lines
-        var docLines = aiResponse.Response
+        var docLines = response
             .Trim('`')
             .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(l => l.Trim())
             .Where(l => l.StartsWith("///"))
             .Select(l => $"{indentation}{l.TrimEnd('\r', '\n')}")
             .ToList();
 
         if (docLines.Count == 0)
         {
-            _logger.LogWarning("No valid documentation lines generated for method {MethodName}", method.Name);
+            _logger.LogWarning("No valid documentation lines generated for method {MethodName}. AI Response: {Response}",
+                method.Name, aiResponse.Response.Substring(0, Math.Min(500, aiResponse.Response.Length)));
+
+            // Save prompt and response for debugging
+            await SaveFailedDocumentationAttemptAsync(filePath, method.Name, methodSource, aiResponse.Response, cancellationToken);
+
+            return false;
+        }
+
+        // Validate the documentation matches the method signature
+        var validationErrors = ValidateDocumentation(method, docLines);
+        if (validationErrors.Any())
+        {
+            _logger.LogWarning("Generated documentation has validation errors for method {MethodName}: {Errors}",
+                method.Name, string.Join(", ", validationErrors));
+
+            // Save prompt and response for debugging
+            await SaveFailedDocumentationAttemptAsync(filePath, method.Name, methodSource,
+                $"VALIDATION ERRORS:\n{string.Join("\n", validationErrors)}\n\nGENERATED DOCUMENTATION:\n{string.Join("\n", docLines)}\n\nAI RESPONSE:\n{aiResponse.Response}",
+                cancellationToken);
+
             return false;
         }
 
@@ -274,6 +322,12 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
 
         // Write modified file
         await File.WriteAllTextAsync(filePath, sb.ToString(), cancellationToken);
+
+        // Delete backup file after successful write
+        if (File.Exists(backupPath))
+        {
+            File.Delete(backupPath);
+        }
 
         _logger.LogInformation("Successfully documented method {MethodName}", method.Name);
         return true;
@@ -337,5 +391,86 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
                "🤖 Generated with [MoonlightAI](https://github.com/ctacke/MoonlightAI)";
 
         return body;
+    }
+
+    private List<string> ValidateDocumentation(Models.Analysis.MethodInfo method, List<string> docLines)
+    {
+        var errors = new List<string>();
+        var docText = string.Join("\n", docLines);
+
+        // Check for <returns> tag on void methods
+        var isVoidMethod = method.ReturnType.Equals("void", StringComparison.OrdinalIgnoreCase) ||
+                           method.ReturnType.Equals("Task", StringComparison.OrdinalIgnoreCase);
+
+        if (isVoidMethod && docText.Contains("<returns>"))
+        {
+            errors.Add($"Method returns {method.ReturnType} but documentation includes <returns> tag");
+        }
+
+        // Check for missing <returns> tag on non-void methods
+        if (!isVoidMethod && !docText.Contains("<returns>"))
+        {
+            errors.Add($"Method returns {method.ReturnType} but documentation is missing <returns> tag");
+        }
+
+        // Check for documented parameters that don't exist
+        var documentedParams = System.Text.RegularExpressions.Regex.Matches(docText, @"<param name=""([^""]+)"">")
+            .Select(m => m.Groups[1].Value)
+            .ToList();
+
+        var actualParamNames = method.Parameters.Select(p => p.Name).ToHashSet();
+
+        foreach (var docParam in documentedParams)
+        {
+            if (!actualParamNames.Contains(docParam))
+            {
+                errors.Add($"Documentation includes parameter '{docParam}' which does not exist in method signature");
+            }
+        }
+
+        // Check for missing parameter documentation
+        foreach (var param in method.Parameters)
+        {
+            if (!documentedParams.Contains(param.Name))
+            {
+                errors.Add($"Method has parameter '{param.Name}' which is not documented");
+            }
+        }
+
+        return errors;
+    }
+
+    private async Task SaveFailedDocumentationAttemptAsync(
+        string filePath,
+        string methodName,
+        string prompt,
+        string response,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Create a debug directory next to the file being processed
+            var debugDir = Path.Combine(Path.GetDirectoryName(filePath) ?? ".", ".moonlight-debug");
+            Directory.CreateDirectory(debugDir);
+
+            // Create a timestamp-based filename
+            var timestamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");
+            var safeMethodName = string.Join("_", methodName.Split(Path.GetInvalidFileNameChars()));
+            var baseFileName = $"{timestamp}-{safeMethodName}";
+
+            // Save the prompt
+            var promptFile = Path.Combine(debugDir, $"{baseFileName}-prompt.txt");
+            await File.WriteAllTextAsync(promptFile, prompt, cancellationToken);
+
+            // Save the response
+            var responseFile = Path.Combine(debugDir, $"{baseFileName}-response.txt");
+            await File.WriteAllTextAsync(responseFile, response, cancellationToken);
+
+            _logger.LogInformation("Saved failed documentation attempt to {DebugDir}", debugDir);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to save debug information for method {MethodName}", methodName);
+        }
     }
 }

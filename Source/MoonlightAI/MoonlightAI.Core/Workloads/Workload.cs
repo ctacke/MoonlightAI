@@ -32,12 +32,12 @@ public abstract class Workload
 
     /// <summary>
     /// Gets the branch name pattern for this workload.
-    /// Format: moonlight/{date}-{workload-type}
+    /// Format: moonlight/{date}-{time}-{workload-type}
     /// </summary>
     public virtual string GetBranchName()
     {
-        var date = DateTime.UtcNow.ToString("yyyyMMdd");
+        var timestamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");
         var type = WorkloadType.ToLowerInvariant().Replace(" ", "-");
-        return $"moonlight/{date}-{type}";
+        return $"moonlight/{timestamp}-{type}";
     }
 }
