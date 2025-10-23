@@ -126,7 +126,7 @@ public class GitManager : IGitManager
     }
 
     /// <inheritdoc/>
-    public Task CommitChangesAsync(string repositoryPath, string message, CancellationToken cancellationToken = default)
+    public Task CommitChangesAsync(string repositoryPath, string message, IEnumerable<string>? filePaths = null, CancellationToken cancellationToken = default)
     {
         return Task.Run(() =>
         {
@@ -134,8 +134,20 @@ public class GitManager : IGitManager
             {
                 using var repo = new Repository(repositoryPath);
 
-                // Stage all changes
-                Commands.Stage(repo, "*");
+                // Stage specified files or all changes
+                if (filePaths != null && filePaths.Any())
+                {
+                    foreach (var filePath in filePaths)
+                    {
+                        Commands.Stage(repo, filePath);
+                        _logger.LogDebug("Staged file: {FilePath}", filePath);
+                    }
+                }
+                else
+                {
+                    Commands.Stage(repo, "*");
+                    _logger.LogDebug("Staged all changes");
+                }
 
                 // Check if there are any changes to commit
                 var status = repo.RetrieveStatus();
@@ -188,7 +200,13 @@ public class GitManager : IGitManager
                 };
 
                 _logger.LogInformation("Pushing branch {BranchName} to remote...", branchName);
-                repo.Network.Push(branch, options);
+
+                // Push using the refspec format to set up tracking
+                var pushRefSpec = $"refs/heads/{branchName}:refs/heads/{branchName}";
+                repo.Network.Push(remote, pushRefSpec, options);
+
+                // Set up branch tracking
+                repo.Branches.Update(branch, b => b.Remote = remote.Name, b => b.UpstreamBranch = branch.CanonicalName);
 
                 _logger.LogInformation("Successfully pushed branch: {BranchName}", branchName);
             }

@@ -81,7 +81,8 @@ public class WorkloadOrchestrator
                     throw new InvalidOperationException("Workload runner did not provide a commit message");
                 }
 
-                await _gitManager.CommitChangesAsync(repositoryPath, result.CommitMessage, cancellationToken);
+                // Commit only the files that were modified by the workload
+                await _gitManager.CommitChangesAsync(repositoryPath, result.CommitMessage, result.ModifiedFiles, cancellationToken);
 
                 _logger.LogInformation("Step 6: Pushing branch...");
                 await _gitManager.PushBranchAsync(repositoryPath, branchName, cancellationToken);

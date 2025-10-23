@@ -64,6 +64,8 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
             if (modified)
             {
                 workload.Statistics.FilesProcessed = 1;
+                // Add the modified file path (relative to repository root)
+                result.ModifiedFiles.Add(workload.FilePath);
             }
             else
             {
@@ -113,52 +115,67 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
     private async Task<bool> ProcessFileAsync(string filePath, CodeDocWorkload workload, CancellationToken cancellationToken)
     {
         var fileModified = false;
-        var fileAnalysis = await _codeAnalyzer.AnalyzeFileAsync(filePath, cancellationToken);
 
-        if (!fileAnalysis.ParsedSuccessfully)
+        // Keep processing until no more undocumented members are found
+        while (true)
         {
-            _logger.LogWarning("Skipping file with parse errors: {FilePath}", filePath);
-            return false;
-        }
+            var fileAnalysis = await _codeAnalyzer.AnalyzeFileAsync(filePath, cancellationToken);
 
-        // Process classes that match visibility criteria
-        foreach (var classInfo in fileAnalysis.Classes.Where(c => ShouldDocument(c.Accessibility, workload.DocumentVisibility)))
-        {
-            // Process methods
-            foreach (var method in classInfo.Methods.Where(m => ShouldDocument(m.Accessibility, workload.DocumentVisibility) && m.XmlDocumentation == null))
+            if (!fileAnalysis.ParsedSuccessfully)
             {
-                try
-                {
-                    var modified = await DocumentMethodAsync(filePath, method, workload, cancellationToken);
-                    if (modified)
-                    {
-                        fileModified = true;
-                        workload.Statistics.ItemsModified++;
+                _logger.LogWarning("Skipping file with parse errors: {FilePath}", filePath);
+                return fileModified;
+            }
 
-                        // Re-analyze the file after modification
-                        fileAnalysis = await _codeAnalyzer.AnalyzeFileAsync(filePath, cancellationToken);
+            var documentedSomething = false;
+
+            // Process classes that match visibility criteria
+            foreach (var classInfo in fileAnalysis.Classes.Where(c => ShouldDocument(c.Accessibility, workload.DocumentVisibility)))
+            {
+                // Process methods - document one at a time
+                var undocumentedMethod = classInfo.Methods
+                    .FirstOrDefault(m => ShouldDocument(m.Accessibility, workload.DocumentVisibility) && m.XmlDocumentation == null);
+
+                if (undocumentedMethod != null)
+                {
+                    try
+                    {
+                        var modified = await DocumentMethodAsync(filePath, undocumentedMethod, workload, cancellationToken);
+                        if (modified)
+                        {
+                            fileModified = true;
+                            documentedSomething = true;
+                            workload.Statistics.ItemsModified++;
+                            break; // Break out to re-analyze with fresh line numbers
+                        }
+                    }
+                    catch (TimeoutException)
+                    {
+                        _logger.LogWarning("AI server timed out for method {MethodName} in {FilePath}", undocumentedMethod.Name, filePath);
+                        workload.Statistics.ErrorCount++;
+                        workload.Statistics.Errors.Add($"Timeout: {classInfo.Name}.{undocumentedMethod.Name}");
                     }
                 }
-                catch (TimeoutException)
+
+                // Process properties
+                foreach (var property in classInfo.Properties.Where(p => ShouldDocument(p.Accessibility, workload.DocumentVisibility) && p.XmlDocumentation == null))
                 {
-                    _logger.LogWarning("AI server timed out for method {MethodName} in {FilePath}", method.Name, filePath);
-                    workload.Statistics.ErrorCount++;
-                    workload.Statistics.Errors.Add($"Timeout: {classInfo.Name}.{method.Name}");
+                    // TODO: Implement property documentation generation
+                    _logger.LogDebug("Property {PropertyName} needs documentation (not yet implemented)", property.Name);
+                }
+
+                // Document class itself if needed
+                if (classInfo.XmlDocumentation == null)
+                {
+                    // TODO: Implement class documentation generation
+                    _logger.LogDebug("Class {ClassName} needs documentation (not yet implemented)", classInfo.Name);
                 }
             }
 
-            // Process properties
-            foreach (var property in classInfo.Properties.Where(p => ShouldDocument(p.Accessibility, workload.DocumentVisibility) && p.XmlDocumentation == null))
+            // If we didn't document anything this iteration, we're done
+            if (!documentedSomething)
             {
-                // TODO: Implement property documentation generation
-                _logger.LogDebug("Property {PropertyName} needs documentation (not yet implemented)", property.Name);
-            }
-
-            // Document class itself if needed
-            if (classInfo.XmlDocumentation == null)
-            {
-                // TODO: Implement class documentation generation
-                _logger.LogDebug("Class {ClassName} needs documentation (not yet implemented)", classInfo.Name);
+                break;
             }
         }
 
@@ -198,6 +215,8 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
 
         workload.Statistics.AIApiCalls++;
         workload.Statistics.TotalAIProcessingTime += aiDuration;
+        workload.Statistics.TotalPromptTokens += aiResponse.PromptEvalCount ?? 0;
+        workload.Statistics.TotalResponseTokens += aiResponse.EvalCount ?? 0;
 
         if (!aiResponse.Done)
         {
@@ -292,6 +311,7 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
                   $"- **AI API calls**: {result.Statistics.AIApiCalls}\n" +
                   $"- **Processing time**: {result.Statistics.Duration?.TotalSeconds:F1} seconds\n" +
                   $"- **AI processing time**: {result.Statistics.TotalAIProcessingTime.TotalSeconds:F1} seconds\n" +
+                  $"- **Total tokens**: {result.Statistics.TotalTokens:N0} ({result.Statistics.TotalPromptTokens:N0} prompt + {result.Statistics.TotalResponseTokens:N0} response)\n" +
                   $"- **Errors**: {result.Statistics.ErrorCount}\n\n";
 
         if (result.Statistics.Errors.Any())

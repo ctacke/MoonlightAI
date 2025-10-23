@@ -59,4 +59,9 @@ public class WorkloadResult
     /// Pull request body/description.
     /// </summary>
     public string? PullRequestBody { get; set; }
+
+    /// <summary>
+    /// List of file paths (relative to repository root) that were modified by this workload.
+    /// </summary>
+    public List<string> ModifiedFiles { get; set; } = new();
 }

@@ -31,7 +31,19 @@ public class CodeDocWorkload : Workload
     public override string GetBranchName()
     {
         var date = DateTime.UtcNow.ToString("yyyyMMdd");
+
+        if (string.IsNullOrWhiteSpace(FilePath))
+        {
+            throw new InvalidOperationException("FilePath must be set before generating branch name");
+        }
+
         var fileName = Path.GetFileNameWithoutExtension(FilePath).ToLowerInvariant();
+
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            throw new InvalidOperationException($"Could not extract filename from FilePath: {FilePath}");
+        }
+
         return $"moonlight/{date}-code-doc-{fileName}";
     }
 }

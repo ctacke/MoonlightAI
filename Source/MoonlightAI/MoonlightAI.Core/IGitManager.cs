@@ -33,12 +33,13 @@ public interface IGitManager
     Task<bool> CreateBranchAsync(string repositoryPath, string branchName, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Commits all changes in the working directory.
+    /// Commits specific files or all changes in the working directory.
     /// </summary>
     /// <param name="repositoryPath">Local path to the repository.</param>
     /// <param name="message">Commit message.</param>
+    /// <param name="filePaths">Optional list of file paths to commit (relative to repository root). If null or empty, commits all changes.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    Task CommitChangesAsync(string repositoryPath, string message, CancellationToken cancellationToken = default);
+    Task CommitChangesAsync(string repositoryPath, string message, IEnumerable<string>? filePaths = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Pushes a branch to the remote repository.

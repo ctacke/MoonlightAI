@@ -63,4 +63,19 @@ public class WorkloadStatistics
     /// Total AI processing time.
     /// </summary>
     public TimeSpan TotalAIProcessingTime { get; set; }
+
+    /// <summary>
+    /// Total number of prompt tokens (input tokens) used across all AI API calls.
+    /// </summary>
+    public int TotalPromptTokens { get; set; }
+
+    /// <summary>
+    /// Total number of response tokens (output tokens) generated across all AI API calls.
+    /// </summary>
+    public int TotalResponseTokens { get; set; }
+
+    /// <summary>
+    /// Total number of tokens (prompt + response) used across all AI API calls.
+    /// </summary>
+    public int TotalTokens => TotalPromptTokens + TotalResponseTokens;
 }
