@@ -1,77 +1,50 @@
 using Microsoft.Extensions.Logging;
-using MoonlightAI.Core.Analysis;
 using MoonlightAI.Core.Git;
 using MoonlightAI.Core.Models;
 
 namespace MoonlightAI.Core.Workloads;
 
 /// <summary>
-/// Schedules and generates workloads for repositories and projects.
+/// Schedules workloads by selecting files and preventing duplicate work across open PRs.
 /// </summary>
-public class WorkloadScheduler
+public class WorkloadScheduler : IWorkloadScheduler
 {
     private readonly ILogger<WorkloadScheduler> _logger;
-    private readonly GitManager _gitManager;
-    private readonly RoslynCodeAnalyzer _codeAnalyzer;
+    private readonly IGitManager _gitManager;
+    private readonly ICodeAnalyzer _codeAnalyzer;
 
     public WorkloadScheduler(
         ILogger<WorkloadScheduler> logger,
-        GitManager gitManager,
-        RoslynCodeAnalyzer codeAnalyzer)
+        IGitManager gitManager,
+        ICodeAnalyzer codeAnalyzer)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _gitManager = gitManager ?? throw new ArgumentNullException(nameof(gitManager));
         _codeAnalyzer = codeAnalyzer ?? throw new ArgumentNullException(nameof(codeAnalyzer));
     }
 
-    /// <summary>
-    /// Scans a project and generates code documentation workloads for files that need documentation.
-    /// </summary>
-    /// <param name="repositoryUrl">Repository URL.</param>
-    /// <param name="projectPath">Path to the project file (relative to repo root).</param>
-    /// <param name="solutionPath">Path to the solution file (optional).</param>
-    /// <param name="visibility">Member visibility to document (default: Public).</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>List of workloads to execute.</returns>
-    public async Task<List<CodeDocWorkload>> GenerateCodeDocWorkloadsAsync(
-        string repositoryUrl,
-        string projectPath,
-        string? solutionPath = null,
-        MemberVisibility visibility = MemberVisibility.Public,
+    /// <inheritdoc/>
+    public async Task<List<string>> SelectFilesForWorkloadAsync(
+        string repositoryPath,
+        RepositoryConfiguration repoConfig,
+        string workloadType,
+        string? projectPath = null,
         CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("Generating code documentation workloads for {ProjectPath}", projectPath);
+        _logger.LogInformation("Selecting files for workload type: {WorkloadType}", workloadType);
 
-        // Clone or pull the repository
-        var repoConfig = new RepositoryConfiguration
-        {
-            RepositoryUrl = repositoryUrl
-        };
+        // Discover candidate files
+        var candidateFiles = DiscoverCandidateFiles(repositoryPath, projectPath);
+        _logger.LogInformation("Found {Count} candidate files", candidateFiles.Count);
 
-        var repositoryPath = await _gitManager.CloneOrPullAsync(repoConfig, cancellationToken);
+        // Get files that are already in open PRs
+        var filesInOpenPRs = await GetFilesInOpenPullRequestsAsync(repoConfig, workloadType, cancellationToken);
+        _logger.LogInformation("Found {Count} files in open PRs", filesInOpenPRs.Count);
 
-        // Get the project directory
-        var projectDir = Path.Combine(repositoryPath, Path.GetDirectoryName(projectPath) ?? "");
-        if (!Directory.Exists(projectDir))
-        {
-            throw new DirectoryNotFoundException($"Project directory not found: {projectDir}");
-        }
+        // Filter out files that are already in PRs and validate remaining files
+        var selectedFiles = new List<string>();
 
-        // Find all C# files in the project
-        var csFiles = Directory.GetFiles(projectDir, "*.cs", SearchOption.AllDirectories)
-            .Where(f => !f.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar) &&
-                       !f.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar))
-            .ToList();
-
-        _logger.LogInformation("Found {FileCount} C# files in project", csFiles.Count);
-
-        var workloads = new List<CodeDocWorkload>();
-
-        // Check existing PRs to avoid duplicate work
-        var existingPRs = await _gitManager.GetExistingPullRequestsAsync(repoConfig, cancellationToken);
-        var existingBranches = existingPRs.ToHashSet();
-
-        foreach (var file in csFiles)
+        foreach (var file in candidateFiles)
         {
             if (cancellationToken.IsCancellationRequested)
             {
@@ -80,82 +53,204 @@ public class WorkloadScheduler
 
             try
             {
-                // Analyze the file to see if it needs documentation
-                var analysis = await _codeAnalyzer.AnalyzeFileAsync(file, cancellationToken);
-
-                if (!analysis.ParsedSuccessfully)
-                {
-                    _logger.LogDebug("Skipping file with parse errors: {FilePath}", file);
-                    continue;
-                }
-
-                // Check if there are any members without documentation matching the visibility criteria
-                var needsDocumentation = analysis.Classes
-                    .Where(c => ShouldDocument(c.Accessibility, visibility))
-                    .Any(c =>
-                        c.Methods.Any(m => ShouldDocument(m.Accessibility, visibility) && m.XmlDocumentation == null) ||
-                        c.Properties.Any(p => ShouldDocument(p.Accessibility, visibility) && p.XmlDocumentation == null) ||
-                        c.XmlDocumentation == null);
-
-                if (!needsDocumentation)
-                {
-                    _logger.LogDebug("File already fully documented: {FilePath}", file);
-                    continue;
-                }
-
-                // Convert absolute path to relative path
+                // Normalize path for comparison
                 var relativePath = Path.GetRelativePath(repositoryPath, file);
+                var normalizedPath = NormalizePath(relativePath);
 
-                // Create workload
-                var workload = new CodeDocWorkload
+                // Skip if file is already in an open PR
+                if (filesInOpenPRs.Contains(normalizedPath))
                 {
-                    RepositoryUrl = repositoryUrl,
-                    SolutionPath = solutionPath ?? string.Empty,
-                    ProjectPath = projectPath,
-                    FilePath = relativePath,
-                    DocumentVisibility = visibility
-                };
-
-                // Check if PR already exists for this file
-                var branchName = workload.GetBranchName();
-                if (existingBranches.Contains(branchName))
-                {
-                    _logger.LogDebug("PR already exists for file: {FilePath}", relativePath);
+                    _logger.LogDebug("Skipping file already in PR: {FilePath}", relativePath);
                     continue;
                 }
 
-                workloads.Add(workload);
-                _logger.LogDebug("Generated workload for: {FilePath}", relativePath);
+                // Check if file should be processed for this workload type
+                if (await ShouldProcessFileAsync(file, repositoryPath, workloadType, cancellationToken))
+                {
+                    selectedFiles.Add(file);
+                    _logger.LogDebug("Selected file: {FilePath}", relativePath);
+                }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Error analyzing file: {FilePath}", file);
+                _logger.LogWarning(ex, "Error evaluating file: {FilePath}", file);
             }
         }
 
-        _logger.LogInformation("Generated {WorkloadCount} code documentation workloads", workloads.Count);
-        return workloads;
+        _logger.LogInformation("Selected {Count} files for processing", selectedFiles.Count);
+        return selectedFiles;
     }
 
-    /// <summary>
-    /// Gets the next workload to execute from a list.
-    /// </summary>
-    public CodeDocWorkload? GetNextWorkload(List<CodeDocWorkload> workloads)
+    /// <inheritdoc/>
+    public async Task<HashSet<string>> GetFilesInOpenPullRequestsAsync(
+        RepositoryConfiguration repoConfig,
+        string workloadType,
+        CancellationToken cancellationToken = default)
     {
-        return workloads.FirstOrDefault(w => w.State == WorkloadState.Queued);
-    }
-
-    private bool ShouldDocument(string accessibility, MemberVisibility visibility)
-    {
-        return accessibility.ToLowerInvariant() switch
+        try
         {
-            "public" => visibility.HasFlag(MemberVisibility.Public),
-            "private" => visibility.HasFlag(MemberVisibility.Private),
-            "protected" => visibility.HasFlag(MemberVisibility.Protected),
-            "internal" => visibility.HasFlag(MemberVisibility.Internal),
-            "protected internal" => visibility.HasFlag(MemberVisibility.ProtectedInternal),
-            "private protected" => visibility.HasFlag(MemberVisibility.PrivateProtected),
-            _ => false
-        };
+            // Get all open PRs
+            var openPRBranches = await _gitManager.GetExistingPullRequestsAsync(repoConfig, cancellationToken);
+
+            var filesInPRs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            // Extract file paths from branch names
+            // Branch naming convention: moonlight/{workload-type}/{relative-file-path}
+            var branchPrefix = $"moonlight/{workloadType}/";
+
+            foreach (var branch in openPRBranches)
+            {
+                if (branch.StartsWith(branchPrefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    var filePath = branch.Substring(branchPrefix.Length);
+                    var normalizedPath = NormalizePath(filePath);
+                    filesInPRs.Add(normalizedPath);
+                    _logger.LogDebug("Found file in open PR: {FilePath}", filePath);
+                }
+            }
+
+            return filesInPRs;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving files from open PRs");
+            // Return empty set to allow processing to continue
+            return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> ShouldProcessFileAsync(
+        string filePath,
+        string repositoryPath,
+        string workloadType,
+        CancellationToken cancellationToken = default)
+    {
+        // Validate the file is a valid candidate
+        if (!IsValidCandidateFile(filePath, workloadType))
+        {
+            return false;
+        }
+
+        // Workload-specific validation
+        switch (workloadType.ToLowerInvariant())
+        {
+            case "codedoc":
+            case "code-documentation":
+                return await ShouldDocumentFileAsync(filePath, cancellationToken);
+
+            // Add more workload types here in the future
+            // case "cleanup":
+            //     return await ShouldCleanupFileAsync(filePath, cancellationToken);
+            // case "unittest":
+            //     return await ShouldGenerateTestsForFileAsync(filePath, cancellationToken);
+
+            default:
+                _logger.LogWarning("Unknown workload type: {WorkloadType}", workloadType);
+                return false;
+        }
+    }
+
+    private List<string> DiscoverCandidateFiles(string repositoryPath, string? projectPath)
+    {
+        var searchPath = repositoryPath;
+
+        // If projectPath is provided, limit scope to that project directory
+        if (!string.IsNullOrEmpty(projectPath))
+        {
+            var projectDir = Path.GetDirectoryName(Path.Combine(repositoryPath, projectPath));
+            if (!string.IsNullOrEmpty(projectDir) && Directory.Exists(projectDir))
+            {
+                searchPath = projectDir;
+            }
+        }
+
+        // Find all C# files, excluding obj and bin directories
+        var csFiles = Directory.GetFiles(searchPath, "*.cs", SearchOption.AllDirectories)
+            .Where(f => !f.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar) &&
+                       !f.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar))
+            .ToList();
+
+        return csFiles;
+    }
+
+    private bool IsValidCandidateFile(string filePath, string workloadType)
+    {
+        // Must be a C# file
+        if (!filePath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        // Exclude obj and bin directories
+        if (filePath.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar) ||
+            filePath.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar))
+        {
+            return false;
+        }
+
+        // Workload-specific exclusions
+        switch (workloadType.ToLowerInvariant())
+        {
+            case "codedoc":
+            case "code-documentation":
+                // Exclude generated files, designer files, etc.
+                if (filePath.EndsWith(".Designer.cs", StringComparison.OrdinalIgnoreCase) ||
+                    filePath.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase) ||
+                    filePath.EndsWith(".g.i.cs", StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+                break;
+        }
+
+        return true;
+    }
+
+    private async Task<bool> ShouldDocumentFileAsync(string filePath, CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Analyze the file to see if it needs documentation
+            var analysis = await _codeAnalyzer.AnalyzeFileAsync(filePath, cancellationToken);
+
+            if (!analysis.ParsedSuccessfully)
+            {
+                _logger.LogDebug("Skipping file with parse errors: {FilePath}", filePath);
+                return false;
+            }
+
+            // Check if there are any public members without documentation
+            var needsDocumentation = analysis.Classes
+                .Where(c => c.Accessibility == "public")
+                .Any(c =>
+                    // Class itself needs documentation
+                    c.XmlDocumentation == null ||
+                    // Public methods need documentation
+                    c.Methods.Any(m => m.Accessibility == "public" && m.XmlDocumentation == null) ||
+                    // Public properties need documentation
+                    c.Properties.Any(p => p.Accessibility == "public" && p.XmlDocumentation == null) ||
+                    // Public const/readonly fields need documentation
+                    c.Fields.Any(f => f.Accessibility == "public" && (f.IsConst || f.IsReadOnly) && f.XmlDocumentation == null));
+
+            if (!needsDocumentation)
+            {
+                _logger.LogDebug("File already fully documented: {FilePath}", filePath);
+                return false;
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error analyzing file: {FilePath}", filePath);
+            return false;
+        }
+    }
+
+    private string NormalizePath(string path)
+    {
+        // Normalize path separators and remove leading/trailing separators
+        return path.Replace('\\', '/').Trim('/');
     }
 }

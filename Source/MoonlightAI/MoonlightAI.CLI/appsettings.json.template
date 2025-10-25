@@ -25,6 +25,9 @@
       "RepositoryUrl": "https://github.com/MyOrg/MyRepo"
     }
   ],
+  "Workload": {
+    "BatchSize": 10
+  },
   "Logging": {
     "LogLevel": {
       "Default": "Information",

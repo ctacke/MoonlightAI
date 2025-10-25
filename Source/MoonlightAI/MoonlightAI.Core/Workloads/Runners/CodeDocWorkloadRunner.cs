@@ -1,6 +1,5 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.Extensions.Logging;
-using MoonlightAI.Core.Analysis;
 using System.Text;
 
 namespace MoonlightAI.Core.Workloads.Runners;
@@ -12,12 +11,12 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
 {
     private readonly ILogger<CodeDocWorkloadRunner> _logger;
     private readonly IAIServer _aiServer;
-    private readonly RoslynCodeAnalyzer _codeAnalyzer;
+    private readonly ICodeAnalyzer _codeAnalyzer;
 
     public CodeDocWorkloadRunner(
         ILogger<CodeDocWorkloadRunner> logger,
         IAIServer aiServer,
-        RoslynCodeAnalyzer codeAnalyzer)
+        ICodeAnalyzer codeAnalyzer)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _aiServer = aiServer ?? throw new ArgumentNullException(nameof(aiServer));
@@ -32,12 +31,6 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
             Workload = workload
         };
 
-        // TODO: find a file to work on
-        workload.FilePath = @"src\Engine\Modules\MQTT\SolutionEngine.MQTT.Module\Services\MqttPublisherService.cs";
-
-        // TODO: add a configuration for this
-        workload.DocumentVisibility = MemberVisibility.Public | MemberVisibility.Internal;
-
         try
         {
             workload.State = WorkloadState.Running;
@@ -49,6 +42,12 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
             if (string.IsNullOrWhiteSpace(workload.FilePath))
             {
                 throw new InvalidOperationException("FilePath is required for code documentation workload");
+            }
+
+            // Set default visibility if not specified
+            if (workload.DocumentVisibility == 0)
+            {
+                workload.DocumentVisibility = MemberVisibility.Public | MemberVisibility.Internal;
             }
 
             var fullFilePath = Path.Combine(repositoryPath, workload.FilePath);

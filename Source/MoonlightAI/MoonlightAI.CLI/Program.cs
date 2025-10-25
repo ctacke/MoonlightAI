@@ -49,16 +49,25 @@ var containerConfig = new ContainerConfiguration();
 configuration.GetSection(ContainerConfiguration.SectionName).Bind(containerConfig);
 services.AddSingleton(containerConfig);
 
+// Bind Workload configuration
+var workloadConfig = new WorkloadConfiguration();
+configuration.GetSection(WorkloadConfiguration.SectionName).Bind(workloadConfig);
+services.AddSingleton(workloadConfig);
+
 // Register HttpClient and AI Server
 services.AddHttpClient<IAIServer, CodeLlamaServer>();
 
 // Register Container Manager
 services.AddSingleton<IContainerManager, DockerContainerManager>();
 
+// Register Workload Scheduler
+services.AddSingleton<IWorkloadScheduler, WorkloadScheduler>();
+
+// Register Core Services
 services.AddSingleton<WorkloadOrchestrator>();
-services.AddSingleton<GitManager>();
+services.AddSingleton<IGitManager, GitManager>();
 services.AddSingleton<RepositoryManager>();
-services.AddSingleton<RoslynCodeAnalyzer>();
+services.AddSingleton<ICodeAnalyzer, RoslynCodeAnalyzer>();
 services.AddSingleton<CodeDocWorkloadRunner>();
 
 // Build service provider
@@ -73,15 +82,19 @@ try
     logger.LogInformation("AI Server URL: {ServerUrl}", aiServerConfig.ServerUrl);
     logger.LogInformation("Model: {ModelName}", aiServerConfig.ModelName);
 
-    var workload = new CodeDocWorkload
-    {
-        SolutionPath = @"src\SolutionEngine.slnx",
-        ProjectPath = @"src\Engine\Modules\MQTT\SolutionEngine.MQTT.Module\SolutionEngine.MQTT.Module.csproj",
-        RepositoryUrl = "https://github.com/LECS-Energy-LLC/solution-family"
-    };
-
     var orchestrator = serviceProvider.GetRequiredService<WorkloadOrchestrator>();
-    await orchestrator.ExecuteWorkloadAsync(workload);
+
+    // Execute code documentation for the repository
+    var result = await orchestrator.ExecuteCodeDocumentationAsync(
+        repositoryUrl: "https://github.com/LECS-Energy-LLC/solution-family",
+        projectPath: @"src\Engine\Modules\MQTT\SolutionEngine.MQTT.Module\SolutionEngine.MQTT.Module.csproj",
+        solutionPath: @"src\SolutionEngine.slnx");
+
+    logger.LogInformation("Code documentation completed: {Summary}", result.Summary);
+    if (!string.IsNullOrEmpty(result.PullRequestUrl))
+    {
+        logger.LogInformation("Pull Request: {PrUrl}", result.PullRequestUrl);
+    }
 }
 catch (Exception ex)
 {

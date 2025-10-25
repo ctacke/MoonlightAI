@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Logging;
 using MoonlightAI.Core.Configuration;
 using MoonlightAI.Core.Containerization;
-using MoonlightAI.Core.Git;
 using MoonlightAI.Core.Models;
 using MoonlightAI.Core.Workloads;
 using MoonlightAI.Core.Workloads.Runners;
@@ -14,19 +13,23 @@ namespace MoonlightAI.Core.Orchestration;
 public class WorkloadOrchestrator
 {
     private readonly ILogger<WorkloadOrchestrator> _logger;
-    private readonly GitManager _gitManager;
+    private readonly IGitManager _gitManager;
     private readonly CodeDocWorkloadRunner _codeDocRunner;
     private readonly IContainerManager _containerManager;
     private readonly IAIServer _aiServer;
     private readonly AIServerConfiguration _aiServerConfig;
+    private readonly IWorkloadScheduler _workloadScheduler;
+    private readonly WorkloadConfiguration _workloadConfig;
 
     public WorkloadOrchestrator(
         ILogger<WorkloadOrchestrator> logger,
-        GitManager gitManager,
+        IGitManager gitManager,
         CodeDocWorkloadRunner codeDocRunner,
         IContainerManager containerManager,
         IAIServer aiServer,
-        AIServerConfiguration aiServerConfig)
+        AIServerConfiguration aiServerConfig,
+        IWorkloadScheduler workloadScheduler,
+        WorkloadConfiguration workloadConfig)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _gitManager = gitManager ?? throw new ArgumentNullException(nameof(gitManager));
@@ -34,6 +37,8 @@ public class WorkloadOrchestrator
         _containerManager = containerManager ?? throw new ArgumentNullException(nameof(containerManager));
         _aiServer = aiServer ?? throw new ArgumentNullException(nameof(aiServer));
         _aiServerConfig = aiServerConfig ?? throw new ArgumentNullException(nameof(aiServerConfig));
+        _workloadScheduler = workloadScheduler ?? throw new ArgumentNullException(nameof(workloadScheduler));
+        _workloadConfig = workloadConfig ?? throw new ArgumentNullException(nameof(workloadConfig));
     }
 
     /// <summary>
@@ -186,6 +191,187 @@ public class WorkloadOrchestrator
                 Statistics = workload.Statistics,
                 Summary = $"Orchestration failed: {ex.Message}"
             };
+        }
+    }
+
+    /// <summary>
+    /// Executes code documentation workload by discovering files and creating individual workloads per file.
+    /// All workloads are executed serially on a single git branch.
+    /// </summary>
+    public async Task<BatchWorkloadResult> ExecuteCodeDocumentationAsync(
+        string repositoryUrl,
+        string? projectPath = null,
+        string? solutionPath = null,
+        CancellationToken cancellationToken = default)
+    {
+        var results = new List<WorkloadResult>();
+        var batchResult = new BatchWorkloadResult { WorkloadResults = results };
+
+        _logger.LogInformation("Starting code documentation for repository {RepositoryUrl}", repositoryUrl);
+
+        try
+        {
+            // Step 0: Ensure container is running
+            _logger.LogInformation("Step 0: Ensuring AI container is running...");
+            var containerReady = await _containerManager.EnsureContainerRunningAsync(cancellationToken);
+            if (!containerReady)
+            {
+                _logger.LogError("AI container is not running and could not be started");
+                batchResult.Success = false;
+                batchResult.Summary = "AI container is not running and could not be started";
+                return batchResult;
+            }
+
+            // Step 0.5: Wait for AI server health
+            _logger.LogInformation("Step 0.5: Verifying AI server health...");
+            var serverHealthy = await WaitForAIServerHealthAsync(cancellationToken);
+            if (!serverHealthy)
+            {
+                _logger.LogError("AI server is not responding");
+                batchResult.Success = false;
+                batchResult.Summary = "AI server is not responding to health checks";
+                return batchResult;
+            }
+
+            // Step 0.6: Verify model availability
+            _logger.LogInformation("Step 0.6: Verifying AI model availability...");
+            var modelValidation = await ValidateModelAvailabilityAsync(cancellationToken);
+            if (!modelValidation.IsValid)
+            {
+                _logger.LogError("AI model validation failed");
+                batchResult.Success = false;
+                batchResult.Summary = modelValidation.ErrorMessage;
+                return batchResult;
+            }
+
+            // Step 1: Clone or pull repository
+            var repoConfig = new RepositoryConfiguration { RepositoryUrl = repositoryUrl };
+            _logger.LogInformation("Step 1: Cloning/pulling repository...");
+            var repositoryPath = await _gitManager.CloneOrPullAsync(repoConfig, cancellationToken);
+
+            // Step 2: Use scheduler to select files that need documentation
+            _logger.LogInformation("Step 2: Selecting files needing documentation using scheduler...");
+            var allFilesToDocument = await _workloadScheduler.SelectFilesForWorkloadAsync(
+                repositoryPath,
+                repoConfig,
+                "codedoc",
+                projectPath,
+                cancellationToken);
+
+            if (!allFilesToDocument.Any())
+            {
+                _logger.LogInformation("No files found to document");
+                batchResult.Success = true;
+                batchResult.Summary = "No files found to document";
+                return batchResult;
+            }
+
+            // Step 2.5: Apply batch size limit
+            var filesToDocument = allFilesToDocument.Take(_workloadConfig.BatchSize).ToList();
+            _logger.LogInformation("Selected {SelectedCount} files from {TotalCount} available files (batch size: {BatchSize})",
+                filesToDocument.Count, allFilesToDocument.Count, _workloadConfig.BatchSize);
+
+            // Step 3: Create single branch for all workloads
+            var branchName = $"moonlight/{DateTime.UtcNow:yyyy-MM-dd}-code-documentation";
+            _logger.LogInformation("Step 3: Creating branch {BranchName}...", branchName);
+
+            var existingPRs = await _gitManager.GetExistingPullRequestsAsync(repoConfig, cancellationToken);
+            if (existingPRs.Contains(branchName))
+            {
+                _logger.LogWarning("PR already exists for branch {BranchName}, aborting", branchName);
+                batchResult.Success = false;
+                batchResult.Summary = $"PR already exists for branch {branchName}";
+                return batchResult;
+            }
+
+            await _gitManager.CreateBranchAsync(repositoryPath, branchName, cancellationToken);
+
+            var allModifiedFiles = new List<string>();
+            var successfulWorkloads = 0;
+
+            // Step 4: Execute workloads serially (one at a time) for each file
+            _logger.LogInformation("Step 4: Processing {Count} files serially...", filesToDocument.Count);
+
+            foreach (var filePath in filesToDocument)
+            {
+                // Create workload for this file
+                var workload = new CodeDocWorkload
+                {
+                    RepositoryUrl = repositoryUrl,
+                    ProjectPath = projectPath ?? string.Empty,
+                    SolutionPath = solutionPath ?? string.Empty,
+                    FilePath = filePath,
+                    DocumentVisibility = MemberVisibility.Public | MemberVisibility.Internal
+                };
+
+                try
+                {
+                    _logger.LogInformation("Processing file {FilePath} ({Current}/{Total})",
+                        filePath, successfulWorkloads + results.Count + 1, filesToDocument.Count);
+
+                    // Execute workload (serial execution - one at a time)
+                    var result = await _codeDocRunner.ExecuteAsync(workload, repositoryPath, cancellationToken);
+                    result.BranchName = branchName;
+                    results.Add(result);
+
+                    if (result.IsSuccess && result.ModifiedFiles.Any())
+                    {
+                        allModifiedFiles.AddRange(result.ModifiedFiles);
+                        successfulWorkloads++;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error executing workload for file {FilePath}", filePath);
+                    results.Add(new WorkloadResult
+                    {
+                        Workload = workload,
+                        State = WorkloadState.Failed,
+                        Summary = $"Workload execution failed: {ex.Message}"
+                    });
+                }
+            }
+
+            // Step 5: Commit all changes if any workloads succeeded
+            if (allModifiedFiles.Any())
+            {
+                _logger.LogInformation("Step 5: Committing {Count} modified files from {SuccessCount} workloads",
+                    allModifiedFiles.Distinct().Count(), successfulWorkloads);
+
+                var commitMessage = $"Add XML documentation - {DateTime.UtcNow:yyyy-MM-dd}\n\n" +
+                                  $"Processed {successfulWorkloads} file(s)\n" +
+                                  $"Modified {allModifiedFiles.Distinct().Count()} file(s)";
+
+                await _gitManager.CommitChangesAsync(repositoryPath, commitMessage, allModifiedFiles.Distinct(), cancellationToken);
+
+                _logger.LogInformation("Step 6: Pushing branch...");
+                await _gitManager.PushBranchAsync(repositoryPath, branchName, cancellationToken);
+
+                _logger.LogInformation("Step 7: Creating pull request...");
+                var prTitle = $"[MoonlightAI] Add XML Documentation - {DateTime.UtcNow:yyyy-MM-dd}";
+                var prBody = $"Automated XML documentation added by MoonlightAI\n\n" +
+                            $"**Files documented:** {successfulWorkloads}/{filesToDocument.Count}\n" +
+                            $"**Total changes:** {allModifiedFiles.Distinct().Count()} file(s)\n";
+
+                var prUrl = await _gitManager.CreatePullRequestAsync(repoConfig, branchName, prTitle, prBody, cancellationToken);
+                batchResult.PullRequestUrl = prUrl;
+
+                _logger.LogInformation("Code documentation completed successfully. PR: {PrUrl}", prUrl);
+            }
+            else
+            {
+                _logger.LogInformation("No files were modified, skipping commit and PR");
+            }
+
+            batchResult.Success = results.Any(r => r.IsSuccess);
+            batchResult.Summary = $"Completed {results.Count(r => r.IsSuccess)}/{results.Count} workloads";
+            return batchResult;
+        }
+        finally
+        {
+            // Clean up container after all workloads complete
+            _logger.LogInformation("All workloads completed. Cleaning up AI container...");
+            await _containerManager.CleanupContainerAsync(cancellationToken);
         }
     }
 
