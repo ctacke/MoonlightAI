@@ -173,6 +173,48 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
                     }
                 }
 
+                // Process fields (constants and enums) - document one at a time
+                var undocumentedField = classInfo.Fields
+                    .Where(f => ShouldDocument(f.Accessibility, workload.DocumentVisibility) &&
+                                f.XmlDocumentation == null &&
+                                (f.IsConst || f.IsReadOnly)) // Only document constants and readonly fields
+                    .FirstOrDefault(f => !failedMembers.Contains($"{classInfo.Name}.{f.Name}"));
+
+                if (undocumentedField != null)
+                {
+                    try
+                    {
+                        var modified = await DocumentFieldAsync(filePath, undocumentedField, workload, cancellationToken);
+                        if (modified)
+                        {
+                            fileModified = true;
+                            documentedSomething = true;
+                            workload.Statistics.ItemsModified++;
+                            break; // Break out to re-analyze with fresh line numbers
+                        }
+                        else
+                        {
+                            // AI failed to generate valid documentation, mark as failed and continue
+                            var memberKey = $"{classInfo.Name}.{undocumentedField.Name}";
+                            failedMembers.Add(memberKey);
+                            workload.Statistics.ErrorCount++;
+                            workload.Statistics.Errors.Add($"Failed to generate documentation: {memberKey}");
+                            documentedSomething = true;
+                            break;
+                        }
+                    }
+                    catch (TimeoutException)
+                    {
+                        var memberKey = $"{classInfo.Name}.{undocumentedField.Name}";
+                        _logger.LogWarning("AI server timed out for field {FieldName} in {FilePath}", undocumentedField.Name, filePath);
+                        failedMembers.Add(memberKey);
+                        workload.Statistics.ErrorCount++;
+                        workload.Statistics.Errors.Add($"Timeout: {memberKey}");
+                        documentedSomething = true;
+                        break;
+                    }
+                }
+
                 // Process properties
                 foreach (var property in classInfo.Properties.Where(p => ShouldDocument(p.Accessibility, workload.DocumentVisibility) && p.XmlDocumentation == null))
                 {
@@ -333,6 +375,129 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
         }
 
         _logger.LogInformation("Successfully documented method {MethodName}", method.Name);
+        return true;
+    }
+
+    private async Task<bool> DocumentFieldAsync(string filePath, Models.Analysis.FieldInfo field, CodeDocWorkload workload, CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("Generating documentation for field {FieldName} at line {LineNumber}", field.Name, field.FirstLineNumber);
+
+        var originalContentLines = await File.ReadAllLinesAsync(filePath, cancellationToken);
+
+        // Extract field declaration (usually just one line)
+        var fieldLine = originalContentLines[field.FirstLineNumber - 1];
+
+        // Generate a simple prompt for constant/field documentation
+        var prompt = $"""
+            Generate XML documentation comment for the following C# constant/field:
+
+            {fieldLine}
+
+            Output **only** the XML documentation comment block.
+
+            Rules:
+            1. Output must begin with "/// <summary>".
+            2. Every line must start with "///".
+            3. Use <summary> tag only (no <returns> or <param> tags).
+            4. Keep it concise (1-2 sentences).
+            5. Do NOT include the field declaration or any code.
+            6. Do NOT explain, describe, or add any extra text.
+            7. Your entire output must be between <doc> and </doc> markers.
+
+            <doc>
+            /// ...
+            </doc>
+            """;
+
+        // Generate documentation
+        var startTime = DateTime.UtcNow;
+        var aiResponse = await _aiServer.SendPromptAsync(prompt, cancellationToken);
+        var aiDuration = DateTime.UtcNow - startTime;
+
+        workload.Statistics.AIApiCalls++;
+        workload.Statistics.TotalAIProcessingTime += aiDuration;
+        workload.Statistics.TotalPromptTokens += aiResponse.PromptEvalCount ?? 0;
+        workload.Statistics.TotalResponseTokens += aiResponse.EvalCount ?? 0;
+
+        if (!aiResponse.Done)
+        {
+            _logger.LogWarning("AI response not complete for field {FieldName}", field.Name);
+            return false;
+        }
+
+        _logger.LogDebug("Documentation generation took {Duration}", aiDuration);
+
+        // Calculate indentation
+        var indentation = new string(' ', originalContentLines[field.FirstLineNumber - 1].TakeWhile(c => c == ' ').Count());
+
+        // Parse and clean documentation lines
+        var response = aiResponse.Response.Trim();
+
+        // Try to extract documentation from <doc> tags if present
+        var docMatch = System.Text.RegularExpressions.Regex.Match(response, @"<doc>\s*(.*?)\s*</doc>",
+            System.Text.RegularExpressions.RegexOptions.Singleline);
+        if (docMatch.Success)
+        {
+            response = docMatch.Groups[1].Value;
+        }
+
+        // Parse and clean documentation lines
+        var docLines = response
+            .Trim('`')
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(l => l.Trim())
+            .Where(l => l.StartsWith("///"))
+            .Select(l => $"{indentation}{l.TrimEnd('\r', '\n')}")
+            .ToList();
+
+        if (docLines.Count == 0)
+        {
+            _logger.LogWarning("No valid documentation lines generated for field {FieldName}. AI Response: {Response}",
+                field.Name, aiResponse.Response.Substring(0, Math.Min(500, aiResponse.Response.Length)));
+
+            await SaveFailedDocumentationAttemptAsync(filePath, field.Name, fieldLine, aiResponse.Response, cancellationToken);
+            return false;
+        }
+
+        // Build new file content
+        var sb = new StringBuilder();
+
+        // Write everything before the field
+        for (var i = 0; i < field.FirstLineNumber - 1; i++)
+        {
+            sb.AppendLine(originalContentLines[i]);
+        }
+
+        // Write the documentation
+        foreach (var docLine in docLines)
+        {
+            sb.AppendLine(docLine);
+        }
+
+        // Write the field and everything after
+        for (var i = field.FirstLineNumber - 1; i < originalContentLines.Length; i++)
+        {
+            sb.AppendLine(originalContentLines[i]);
+        }
+
+        // Back up original file
+        var backupPath = filePath + ".bak";
+        if (File.Exists(backupPath))
+        {
+            File.Delete(backupPath);
+        }
+        File.Move(filePath, backupPath);
+
+        // Write modified file
+        await File.WriteAllTextAsync(filePath, sb.ToString(), cancellationToken);
+
+        // Delete backup file after successful write
+        if (File.Exists(backupPath))
+        {
+            File.Delete(backupPath);
+        }
+
+        _logger.LogInformation("Successfully documented field {FieldName}", field.Name);
         return true;
     }
 

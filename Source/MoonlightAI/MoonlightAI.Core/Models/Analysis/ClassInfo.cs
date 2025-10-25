@@ -41,6 +41,11 @@ public class ClassInfo
     public List<MethodInfo> Methods { get; set; } = new();
 
     /// <summary>
+    /// Fields (including constants) in the class.
+    /// </summary>
+    public List<FieldInfo> Fields { get; set; } = new();
+
+    /// <summary>
     /// Whether the class is static.
     /// </summary>
     public bool IsStatic { get; set; }

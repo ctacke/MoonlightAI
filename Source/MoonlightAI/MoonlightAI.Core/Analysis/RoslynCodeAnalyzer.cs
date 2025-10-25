@@ -139,6 +139,7 @@ public class RoslynCodeAnalyzer : ICodeAnalyzer
 
         publicMembers.AddRange(classInfo.Properties.Where(p => p.Accessibility == "public"));
         publicMembers.AddRange(classInfo.Methods.Where(m => m.Accessibility == "public"));
+        publicMembers.AddRange(classInfo.Fields.Where(f => f.Accessibility == "public"));
 
         return publicMembers.OrderBy(m => m.FirstLineNumber);
     }
@@ -208,6 +209,14 @@ public class RoslynCodeAnalyzer : ICodeAnalyzer
             classInfo.Methods.Add(methodInfo);
         }
 
+        // Analyze fields (including constants and enums)
+        var fields = classDecl.Members.OfType<FieldDeclarationSyntax>();
+        foreach (var field in fields)
+        {
+            var fieldInfos = AnalyzeField(field, syntaxTree);
+            classInfo.Fields.AddRange(fieldInfos);
+        }
+
         return classInfo;
     }
 
@@ -252,6 +261,37 @@ public class RoslynCodeAnalyzer : ICodeAnalyzer
         }
 
         return methodInfo;
+    }
+
+    private List<Models.Analysis.FieldInfo> AnalyzeField(FieldDeclarationSyntax fieldDecl, SyntaxTree syntaxTree)
+    {
+        var fields = new List<Models.Analysis.FieldInfo>();
+        var accessibility = GetAccessibility(fieldDecl.Modifiers);
+        var isConst = fieldDecl.Modifiers.Any(m => m.IsKind(SyntaxKind.ConstKeyword));
+        var isReadOnly = fieldDecl.Modifiers.Any(m => m.IsKind(SyntaxKind.ReadOnlyKeyword));
+        var isStatic = fieldDecl.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword));
+        var xmlDoc = GetXmlDocumentation(fieldDecl);
+
+        // A field declaration can declare multiple fields (e.g., public const int A = 1, B = 2;)
+        foreach (var variable in fieldDecl.Declaration.Variables)
+        {
+            var fieldInfo = new Models.Analysis.FieldInfo
+            {
+                Name = variable.Identifier.Text,
+                Type = fieldDecl.Declaration.Type.ToString(),
+                Accessibility = accessibility,
+                FirstLineNumber = syntaxTree.GetLineSpan(variable.Span).StartLinePosition.Line + 1,
+                XmlDocumentation = xmlDoc,
+                IsConst = isConst,
+                IsReadOnly = isReadOnly,
+                IsStatic = isStatic,
+                InitializerValue = variable.Initializer?.Value.ToString()
+            };
+
+            fields.Add(fieldInfo);
+        }
+
+        return fields;
     }
 
     private string GetAccessibility(SyntaxTokenList modifiers)
