@@ -462,3 +462,8 @@ FodyWeavers.xsd
 *.msm
 *.msp
 >>>>>>> 9b5364642b25004ada31ba4c9cc5ad0449d23453
+
+# MoonlightAI - SQLite database files
+*.db
+*.db-shm
+*.db-wal

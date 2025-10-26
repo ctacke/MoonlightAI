@@ -1,6 +1,10 @@
+using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using MoonlightAI.Core.Configuration;
 using MoonlightAI.Core.Containerization;
+using MoonlightAI.Core.Data;
+using MoonlightAI.Core.Data.Models;
 using MoonlightAI.Core.Models;
 using MoonlightAI.Core.Workloads;
 using MoonlightAI.Core.Workloads.Runners;
@@ -20,6 +24,7 @@ public class WorkloadOrchestrator
     private readonly AIServerConfiguration _aiServerConfig;
     private readonly IWorkloadScheduler _workloadScheduler;
     private readonly WorkloadConfiguration _workloadConfig;
+    private readonly IServiceProvider _serviceProvider;
 
     public WorkloadOrchestrator(
         ILogger<WorkloadOrchestrator> logger,
@@ -29,7 +34,8 @@ public class WorkloadOrchestrator
         IAIServer aiServer,
         AIServerConfiguration aiServerConfig,
         IWorkloadScheduler workloadScheduler,
-        WorkloadConfiguration workloadConfig)
+        WorkloadConfiguration workloadConfig,
+        IServiceProvider serviceProvider)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _gitManager = gitManager ?? throw new ArgumentNullException(nameof(gitManager));
@@ -39,6 +45,7 @@ public class WorkloadOrchestrator
         _aiServerConfig = aiServerConfig ?? throw new ArgumentNullException(nameof(aiServerConfig));
         _workloadScheduler = workloadScheduler ?? throw new ArgumentNullException(nameof(workloadScheduler));
         _workloadConfig = workloadConfig ?? throw new ArgumentNullException(nameof(workloadConfig));
+        _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
     }
 
     /// <summary>
@@ -209,6 +216,44 @@ public class WorkloadOrchestrator
 
         _logger.LogInformation("Starting code documentation for repository {RepositoryUrl}", repositoryUrl);
 
+        // Variables for database tracking and workload execution
+        WorkloadRunRecord? runRecord = null;
+        IServiceScope? scope = null;
+        IDataService? dataService = null;
+        List<string> allFilesToDocument = new();
+        List<string> filesToDocument = new();
+        string branchName = string.Empty;
+
+        try
+        {
+            // Start database tracking
+            scope = _serviceProvider.CreateScope();
+            dataService = scope.ServiceProvider.GetRequiredService<IDataService>();
+
+            var configJson = JsonSerializer.Serialize(new
+            {
+                BatchSize = _workloadConfig.BatchSize,
+                ValidateBuilds = _workloadConfig.ValidateBuilds,
+                MaxBuildRetries = _workloadConfig.MaxBuildRetries,
+                RevertOnBuildFailure = _workloadConfig.RevertOnBuildFailure
+            });
+
+            runRecord = await dataService.StartRunAsync(
+                workloadType: "CodeDocumentation",
+                repositoryUrl: repositoryUrl,
+                branchName: $"moonlight/{DateTime.UtcNow:yyyy-MM-dd-HHmmss}-code-documentation",
+                modelName: _aiServerConfig.ModelName,
+                serverUrl: _aiServerConfig.ServerUrl,
+                configurationJson: configJson,
+                cancellationToken: cancellationToken);
+
+            _logger.LogInformation("Started database tracking for run {RunId}", runRecord.RunId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to start database tracking, continuing without it");
+        }
+
         try
         {
             // Step 0: Ensure container is running
@@ -251,7 +296,7 @@ public class WorkloadOrchestrator
 
             // Step 2: Use scheduler to select files that need documentation
             _logger.LogInformation("Step 2: Selecting files needing documentation using scheduler...");
-            var allFilesToDocument = await _workloadScheduler.SelectFilesForWorkloadAsync(
+            allFilesToDocument = await _workloadScheduler.SelectFilesForWorkloadAsync(
                 repositoryPath,
                 repoConfig,
                 "codedoc",
@@ -267,13 +312,13 @@ public class WorkloadOrchestrator
             }
 
             // Step 2.5: Apply batch size limit
-            var filesToDocument = allFilesToDocument.Take(_workloadConfig.BatchSize).ToList();
+            filesToDocument = allFilesToDocument.Take(_workloadConfig.BatchSize).ToList();
             _logger.LogInformation("Selected {SelectedCount} files from {TotalCount} available files (batch size: {BatchSize})",
                 filesToDocument.Count, allFilesToDocument.Count, _workloadConfig.BatchSize);
 
             // Step 3: Create single branch for all workloads with timestamp for uniqueness
             var timestamp = DateTime.UtcNow.ToString("yyyy-MM-dd-HHmmss");
-            var branchName = $"moonlight/{timestamp}-code-documentation";
+            branchName = $"moonlight/{timestamp}-code-documentation";
             _logger.LogInformation("Step 3: Creating branch {BranchName}...", branchName);
 
             await _gitManager.CreateBranchAsync(repositoryPath, branchName, cancellationToken);
@@ -357,13 +402,64 @@ public class WorkloadOrchestrator
 
             batchResult.Success = results.Any(r => r.IsSuccess);
             batchResult.Summary = $"Completed {results.Count(r => r.IsSuccess)}/{results.Count} workloads";
+
+            // Update database tracking with final results
+            if (runRecord != null && dataService != null)
+            {
+                try
+                {
+                    runRecord.EndTime = DateTime.UtcNow;
+                    runRecord.Success = batchResult.Success;
+                    runRecord.TotalFilesDiscovered = allFilesToDocument.Count;
+                    runRecord.FilesSelected = filesToDocument.Count;
+                    runRecord.FilesSuccessful = results.Count(r => r.IsSuccess);
+                    runRecord.FilesFailed = results.Count(r => !r.IsSuccess);
+                    runRecord.FilesSkipped = allFilesToDocument.Count - filesToDocument.Count;
+                    runRecord.TotalBuildFailures = results.Sum(r => r.Statistics?.BuildFailures ?? 0);
+                    runRecord.TotalBuildRetries = results.Sum(r => r.Statistics?.BuildRetries ?? 0);
+                    runRecord.TotalPromptTokens = results.Sum(r => r.Statistics?.TotalPromptTokens ?? 0);
+                    runRecord.TotalResponseTokens = results.Sum(r => r.Statistics?.TotalResponseTokens ?? 0);
+                    runRecord.PullRequestUrl = batchResult.PullRequestUrl;
+                    runRecord.BranchName = branchName;
+
+                    await dataService.UpdateRunAsync(runRecord, cancellationToken);
+                    _logger.LogInformation("Updated database tracking for run {RunId}", runRecord.RunId);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to update database tracking");
+                }
+            }
+
             return batchResult;
+        }
+        catch (Exception ex)
+        {
+            // Update run record with failure
+            if (runRecord != null && dataService != null)
+            {
+                try
+                {
+                    runRecord.EndTime = DateTime.UtcNow;
+                    runRecord.Success = false;
+                    runRecord.ErrorMessage = ex.Message;
+                    await dataService.UpdateRunAsync(runRecord, cancellationToken);
+                }
+                catch
+                {
+                    // Ignore errors updating database on failure
+                }
+            }
+            throw;
         }
         finally
         {
             // Clean up container after all workloads complete
             _logger.LogInformation("All workloads completed. Cleaning up AI container...");
             await _containerManager.CleanupContainerAsync(cancellationToken);
+
+            // Dispose scope
+            scope?.Dispose();
         }
     }
 

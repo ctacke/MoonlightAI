@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.Configuration;
+﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using MoonlightAI.Core;
@@ -6,6 +7,7 @@ using MoonlightAI.Core.Analysis;
 using MoonlightAI.Core.Build;
 using MoonlightAI.Core.Configuration;
 using MoonlightAI.Core.Containerization;
+using MoonlightAI.Core.Data;
 using MoonlightAI.Core.Git;
 using MoonlightAI.Core.Models;
 using MoonlightAI.Core.Orchestration;
@@ -55,6 +57,11 @@ var workloadConfig = new WorkloadConfiguration();
 configuration.GetSection(WorkloadConfiguration.SectionName).Bind(workloadConfig);
 services.AddSingleton(workloadConfig);
 
+// Bind Database configuration
+var databaseConfig = new DatabaseConfiguration();
+configuration.GetSection(DatabaseConfiguration.SectionName).Bind(databaseConfig);
+services.AddSingleton(databaseConfig);
+
 // Register HttpClient and AI Server
 services.AddHttpClient<IAIServer, CodeLlamaServer>();
 
@@ -66,6 +73,18 @@ services.AddSingleton<IWorkloadScheduler, WorkloadScheduler>();
 
 // Register Build Validator
 services.AddSingleton<IBuildValidator, DotNetBuildValidator>();
+
+// Register Database
+services.AddDbContext<MoonlightDbContext>(options =>
+{
+    options.UseSqlite($"Data Source={databaseConfig.DatabasePath}");
+    if (databaseConfig.EnableDetailedLogging)
+    {
+        options.EnableSensitiveDataLogging();
+        options.EnableDetailedErrors();
+    }
+});
+services.AddScoped<IDataService, SQLiteDataService>();
 
 // Register Core Services
 services.AddSingleton<WorkloadOrchestrator>();
@@ -85,6 +104,13 @@ try
     logger.LogInformation("MoonlightAI starting...");
     logger.LogInformation("AI Server URL: {ServerUrl}", aiServerConfig.ServerUrl);
     logger.LogInformation("Model: {ModelName}", aiServerConfig.ModelName);
+
+    // Initialize database
+    using (var scope = serviceProvider.CreateScope())
+    {
+        var dataService = scope.ServiceProvider.GetRequiredService<IDataService>();
+        await dataService.InitializeAsync();
+    }
 
     var orchestrator = serviceProvider.GetRequiredService<WorkloadOrchestrator>();
 

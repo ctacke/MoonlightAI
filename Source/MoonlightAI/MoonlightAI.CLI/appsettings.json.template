@@ -31,6 +31,10 @@
     "MaxBuildRetries": 2,
     "RevertOnBuildFailure": true
   },
+  "Database": {
+    "DatabasePath": "./moonlight.db",
+    "EnableDetailedLogging": false
+  },
   "Logging": {
     "LogLevel": {
       "Default": "Information",
