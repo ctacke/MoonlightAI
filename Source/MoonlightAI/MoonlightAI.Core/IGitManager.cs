@@ -59,4 +59,12 @@ public interface IGitManager
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>URL of the created pull request.</returns>
     Task<string> CreatePullRequestAsync(RepositoryConfiguration repository, string branchName, string title, string body, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Reverts uncommitted changes to a specific file, restoring it to the HEAD state.
+    /// </summary>
+    /// <param name="repositoryPath">Local path to the repository.</param>
+    /// <param name="filePath">Relative path to the file to revert.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task RevertFileAsync(string repositoryPath, string filePath, CancellationToken cancellationToken = default);
 }

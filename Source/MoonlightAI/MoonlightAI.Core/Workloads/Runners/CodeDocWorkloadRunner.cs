@@ -1,6 +1,8 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.Extensions.Logging;
 using System.Text;
+using MoonlightAI.Core.Build;
+using MoonlightAI.Core.Configuration;
 
 namespace MoonlightAI.Core.Workloads.Runners;
 
@@ -12,15 +14,24 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
     private readonly ILogger<CodeDocWorkloadRunner> _logger;
     private readonly IAIServer _aiServer;
     private readonly ICodeAnalyzer _codeAnalyzer;
+    private readonly IBuildValidator _buildValidator;
+    private readonly IGitManager _gitManager;
+    private readonly WorkloadConfiguration _workloadConfig;
 
     public CodeDocWorkloadRunner(
         ILogger<CodeDocWorkloadRunner> logger,
         IAIServer aiServer,
-        ICodeAnalyzer codeAnalyzer)
+        ICodeAnalyzer codeAnalyzer,
+        IBuildValidator buildValidator,
+        IGitManager gitManager,
+        WorkloadConfiguration workloadConfig)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _aiServer = aiServer ?? throw new ArgumentNullException(nameof(aiServer));
         _codeAnalyzer = codeAnalyzer ?? throw new ArgumentNullException(nameof(codeAnalyzer));
+        _buildValidator = buildValidator ?? throw new ArgumentNullException(nameof(buildValidator));
+        _gitManager = gitManager ?? throw new ArgumentNullException(nameof(gitManager));
+        _workloadConfig = workloadConfig ?? throw new ArgumentNullException(nameof(workloadConfig));
     }
 
     /// <inheritdoc/>
@@ -62,9 +73,35 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
 
             if (modified)
             {
-                workload.Statistics.FilesProcessed = 1;
-                // Add the modified file path (relative to repository root)
-                result.ModifiedFiles.Add(workload.FilePath);
+                // Validate build if enabled
+                bool buildPassed = true;
+
+                if (_workloadConfig.ValidateBuilds && !string.IsNullOrWhiteSpace(workload.SolutionPath))
+                {
+                    buildPassed = await ValidateAndFixBuildAsync(
+                        repositoryPath,
+                        workload.SolutionPath,
+                        workload.FilePath,
+                        workload,
+                        cancellationToken);
+                }
+                else if (_workloadConfig.ValidateBuilds && string.IsNullOrWhiteSpace(workload.SolutionPath))
+                {
+                    _logger.LogWarning("Build validation is enabled but no solution path provided, skipping validation");
+                }
+
+                if (buildPassed)
+                {
+                    workload.Statistics.FilesProcessed = 1;
+                    // Add the modified file path (relative to repository root)
+                    result.ModifiedFiles.Add(workload.FilePath);
+                }
+                else
+                {
+                    // File was reverted due to build failure
+                    workload.Statistics.FilesProcessed = 0;
+                    _logger.LogWarning("File {FilePath} was reverted due to build validation failure", workload.FilePath);
+                }
             }
             else
             {
@@ -662,5 +699,249 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
         {
             _logger.LogWarning(ex, "Failed to save debug information for method {MethodName}", methodName);
         }
+    }
+
+    /// <summary>
+    /// Validates the build after modifying a file and attempts to fix any errors with AI.
+    /// </summary>
+    /// <returns>True if build passes or is fixed successfully, false if file was reverted.</returns>
+    private async Task<bool> ValidateAndFixBuildAsync(
+        string repositoryPath,
+        string solutionPath,
+        string filePath,
+        CodeDocWorkload workload,
+        CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("Validating build after modifying {FilePath}", filePath);
+
+        // Build the solution
+        var buildResult = await _buildValidator.BuildAsync(repositoryPath, solutionPath, cancellationToken);
+
+        if (buildResult.Success)
+        {
+            _logger.LogInformation("Build validation passed");
+            return true;
+        }
+
+        // Build failed - try to fix with AI
+        _logger.LogWarning("Build failed with {ErrorCount} error(s), attempting AI fix...", buildResult.Errors.Count);
+
+        // Filter errors related to the current file
+        var fileErrors = buildResult.Errors
+            .Where(e => e.FilePath.Equals(filePath, StringComparison.OrdinalIgnoreCase) ||
+                       Path.GetFullPath(Path.Combine(repositoryPath, e.FilePath))
+                           .Equals(Path.GetFullPath(Path.Combine(repositoryPath, filePath)), StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (!fileErrors.Any())
+        {
+            _logger.LogWarning("Build failed but no errors attributed to {FilePath}. Errors in other files may have been introduced.", filePath);
+            // Still consider this a failure for this file since the build is broken
+            fileErrors = buildResult.Errors.ToList();
+        }
+
+        // Try to fix with AI (with retries)
+        for (int attempt = 1; attempt <= _workloadConfig.MaxBuildRetries; attempt++)
+        {
+            workload.Statistics.BuildRetries++;
+
+            _logger.LogInformation("AI fix attempt {Attempt}/{Max} for {FilePath}",
+                attempt, _workloadConfig.MaxBuildRetries, filePath);
+
+            var fixApplied = await TryFixBuildErrorsAsync(
+                repositoryPath,
+                filePath,
+                fileErrors,
+                attempt,
+                workload,
+                cancellationToken);
+
+            if (fixApplied)
+            {
+                // Build again to verify
+                var retryBuildResult = await _buildValidator.BuildAsync(repositoryPath, solutionPath, cancellationToken);
+
+                if (retryBuildResult.Success)
+                {
+                    _logger.LogInformation("AI successfully fixed build errors on attempt {Attempt}", attempt);
+                    return true;
+                }
+
+                _logger.LogWarning("AI fix applied but build still fails ({ErrorCount} errors)", retryBuildResult.Errors.Count);
+
+                // Update errors for next attempt
+                fileErrors = retryBuildResult.Errors
+                    .Where(e => e.FilePath.Equals(filePath, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                if (!fileErrors.Any())
+                {
+                    fileErrors = retryBuildResult.Errors.ToList();
+                }
+            }
+            else
+            {
+                _logger.LogWarning("AI failed to provide a fix on attempt {Attempt}", attempt);
+            }
+        }
+
+        // All fix attempts exhausted
+        workload.Statistics.BuildFailures++;
+        workload.Statistics.SkippedFiles.Add(filePath);
+        workload.Statistics.Errors.Add($"Build failed for {filePath} after {_workloadConfig.MaxBuildRetries} fix attempts");
+
+        if (_workloadConfig.RevertOnBuildFailure)
+        {
+            _logger.LogError("Unable to fix build errors after {MaxRetries} attempts, reverting {FilePath}",
+                _workloadConfig.MaxBuildRetries, filePath);
+
+            await _gitManager.RevertFileAsync(repositoryPath, filePath, cancellationToken);
+
+            _logger.LogInformation("File reverted: {FilePath}", filePath);
+            return false;
+        }
+        else
+        {
+            _logger.LogWarning("Build validation failed but RevertOnBuildFailure is false, keeping changes for manual review");
+            return true; // Don't revert, but mark it as an issue
+        }
+    }
+
+    /// <summary>
+    /// Attempts to fix build errors by sending them to AI for correction.
+    /// </summary>
+    private async Task<bool> TryFixBuildErrorsAsync(
+        string repositoryPath,
+        string filePath,
+        List<Models.BuildError> errors,
+        int attemptNumber,
+        CodeDocWorkload workload,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var fullFilePath = Path.Combine(repositoryPath, filePath);
+            var currentCode = await File.ReadAllTextAsync(fullFilePath, cancellationToken);
+
+            // Create prompt with build errors
+            var prompt = CreateBuildErrorFixPrompt(filePath, currentCode, errors, attemptNumber);
+
+            _logger.LogDebug("Sending build error fix request to AI (attempt {Attempt})", attemptNumber);
+
+            // Send to AI
+            var startTime = DateTime.UtcNow;
+            var aiResponse = await _aiServer.SendPromptAsync(prompt, cancellationToken);
+            var aiDuration = DateTime.UtcNow - startTime;
+
+            workload.Statistics.AIApiCalls++;
+            workload.Statistics.TotalAIProcessingTime += aiDuration;
+            workload.Statistics.TotalPromptTokens += aiResponse.PromptEvalCount ?? 0;
+            workload.Statistics.TotalResponseTokens += aiResponse.EvalCount ?? 0;
+
+            if (string.IsNullOrWhiteSpace(aiResponse.Response))
+            {
+                _logger.LogWarning("AI returned empty response for build error fix");
+                return false;
+            }
+
+            // Extract code from response (AI might wrap it in markdown code blocks)
+            var fixedCode = ExtractCodeFromResponse(aiResponse.Response);
+
+            // Apply the fix
+            await File.WriteAllTextAsync(fullFilePath, fixedCode, cancellationToken);
+
+            _logger.LogInformation("Applied AI fix to {FilePath}", filePath);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during AI fix attempt for {FilePath}", filePath);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Creates a prompt for the AI to fix build errors.
+    /// </summary>
+    private string CreateBuildErrorFixPrompt(string filePath, string currentCode, List<Models.BuildError> errors, int attemptNumber)
+    {
+        var sb = new StringBuilder();
+
+        sb.AppendLine("The following C# file was modified to add XML documentation but now has build errors.");
+        sb.AppendLine();
+        sb.AppendLine($"File: {filePath}");
+        sb.AppendLine($"Fix Attempt: {attemptNumber}");
+        sb.AppendLine();
+        sb.AppendLine("Build Errors:");
+        sb.AppendLine("----------------------------------------");
+
+        foreach (var error in errors)
+        {
+            sb.AppendLine($"Line {error.LineNumber}: {error.ErrorCode} - {error.Message}");
+        }
+
+        sb.AppendLine("----------------------------------------");
+        sb.AppendLine();
+        sb.AppendLine("Current File Content:");
+        sb.AppendLine("```csharp");
+
+        // Add line numbers to help AI locate errors
+        var lines = currentCode.Split('\n');
+        for (int i = 0; i < lines.Length; i++)
+        {
+            sb.AppendLine($"{i + 1,4}: {lines[i].TrimEnd('\r')}");
+        }
+
+        sb.AppendLine("```");
+        sb.AppendLine();
+        sb.AppendLine("Instructions:");
+        sb.AppendLine("1. Fix the build errors while preserving all XML documentation that was added");
+        sb.AppendLine("2. Do not remove or modify XML documentation comments unless they are causing the errors");
+        sb.AppendLine("3. Return ONLY the complete corrected C# code");
+        sb.AppendLine("4. Do not include any explanations, markdown formatting, or code block markers in your response");
+        sb.AppendLine("5. The response should be valid C# code that can be directly written to the file");
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Extracts code from AI response, handling markdown code blocks if present.
+    /// </summary>
+    private string ExtractCodeFromResponse(string response)
+    {
+        // Check if response is wrapped in markdown code blocks
+        var trimmed = response.Trim();
+
+        if (trimmed.StartsWith("```"))
+        {
+            // Extract code from markdown code block
+            var lines = trimmed.Split('\n');
+            var codeLines = new List<string>();
+            bool inCodeBlock = false;
+
+            foreach (var line in lines)
+            {
+                if (line.Trim().StartsWith("```"))
+                {
+                    if (!inCodeBlock)
+                    {
+                        inCodeBlock = true;
+                    }
+                    else
+                    {
+                        break; // End of code block
+                    }
+                }
+                else if (inCodeBlock)
+                {
+                    codeLines.Add(line);
+                }
+            }
+
+            return string.Join('\n', codeLines);
+        }
+
+        // No markdown formatting, return as-is
+        return response;
     }
 }

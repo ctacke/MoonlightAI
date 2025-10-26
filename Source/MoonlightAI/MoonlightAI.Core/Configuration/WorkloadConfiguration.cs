@@ -15,4 +15,22 @@ public class WorkloadConfiguration
     /// Default is 10 files per batch.
     /// </summary>
     public int BatchSize { get; set; } = 10;
+
+    /// <summary>
+    /// Whether to validate builds after modifying files.
+    /// Default is true.
+    /// </summary>
+    public bool ValidateBuilds { get; set; } = true;
+
+    /// <summary>
+    /// Maximum number of times to retry fixing build errors with AI.
+    /// Default is 2 attempts.
+    /// </summary>
+    public int MaxBuildRetries { get; set; } = 2;
+
+    /// <summary>
+    /// Whether to revert files that fail build validation after all retry attempts.
+    /// Default is true.
+    /// </summary>
+    public bool RevertOnBuildFailure { get; set; } = true;
 }

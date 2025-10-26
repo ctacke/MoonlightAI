@@ -271,18 +271,10 @@ public class WorkloadOrchestrator
             _logger.LogInformation("Selected {SelectedCount} files from {TotalCount} available files (batch size: {BatchSize})",
                 filesToDocument.Count, allFilesToDocument.Count, _workloadConfig.BatchSize);
 
-            // Step 3: Create single branch for all workloads
-            var branchName = $"moonlight/{DateTime.UtcNow:yyyy-MM-dd}-code-documentation";
+            // Step 3: Create single branch for all workloads with timestamp for uniqueness
+            var timestamp = DateTime.UtcNow.ToString("yyyy-MM-dd-HHmmss");
+            var branchName = $"moonlight/{timestamp}-code-documentation";
             _logger.LogInformation("Step 3: Creating branch {BranchName}...", branchName);
-
-            var existingPRs = await _gitManager.GetExistingPullRequestsAsync(repoConfig, cancellationToken);
-            if (existingPRs.Contains(branchName))
-            {
-                _logger.LogWarning("PR already exists for branch {BranchName}, aborting", branchName);
-                batchResult.Success = false;
-                batchResult.Summary = $"PR already exists for branch {branchName}";
-                return batchResult;
-            }
 
             await _gitManager.CreateBranchAsync(repositoryPath, branchName, cancellationToken);
 

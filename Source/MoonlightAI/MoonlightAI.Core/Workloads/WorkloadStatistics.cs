@@ -78,4 +78,19 @@ public class WorkloadStatistics
     /// Total number of tokens (prompt + response) used across all AI API calls.
     /// </summary>
     public int TotalTokens => TotalPromptTokens + TotalResponseTokens;
+
+    /// <summary>
+    /// Number of files that failed build validation.
+    /// </summary>
+    public int BuildFailures { get; set; }
+
+    /// <summary>
+    /// Total number of build retry attempts made.
+    /// </summary>
+    public int BuildRetries { get; set; }
+
+    /// <summary>
+    /// List of files that were skipped due to unfixable build errors.
+    /// </summary>
+    public List<string> SkippedFiles { get; set; } = new();
 }

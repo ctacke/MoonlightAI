@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using MoonlightAI.Core;
 using MoonlightAI.Core.Analysis;
+using MoonlightAI.Core.Build;
 using MoonlightAI.Core.Configuration;
 using MoonlightAI.Core.Containerization;
 using MoonlightAI.Core.Git;
@@ -62,6 +63,9 @@ services.AddSingleton<IContainerManager, DockerContainerManager>();
 
 // Register Workload Scheduler
 services.AddSingleton<IWorkloadScheduler, WorkloadScheduler>();
+
+// Register Build Validator
+services.AddSingleton<IBuildValidator, DotNetBuildValidator>();
 
 // Register Core Services
 services.AddSingleton<WorkloadOrchestrator>();

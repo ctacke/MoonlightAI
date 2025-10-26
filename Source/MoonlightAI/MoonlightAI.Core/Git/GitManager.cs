@@ -339,4 +339,42 @@ public class GitManager : IGitManager
             _logger.LogInformation("Successfully pulled latest changes");
         }
     }
+
+    /// <inheritdoc/>
+    public async Task RevertFileAsync(string repositoryPath, string filePath, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(repositoryPath))
+        {
+            throw new ArgumentException("Repository path cannot be null or empty.", nameof(repositoryPath));
+        }
+
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            throw new ArgumentException("File path cannot be null or empty.", nameof(filePath));
+        }
+
+        _logger.LogInformation("Reverting file: {FilePath}", filePath);
+
+        using var repo = new Repository(repositoryPath);
+
+        // Check if file exists in the repository
+        var fullPath = Path.Combine(repositoryPath, filePath);
+        if (!File.Exists(fullPath))
+        {
+            _logger.LogWarning("File not found, cannot revert: {FilePath}", filePath);
+            return;
+        }
+
+        // Restore file to HEAD state (undo uncommitted changes)
+        var checkoutOptions = new CheckoutOptions
+        {
+            CheckoutModifiers = CheckoutModifiers.Force
+        };
+
+        repo.CheckoutPaths("HEAD", new[] { filePath }, checkoutOptions);
+
+        _logger.LogInformation("Successfully reverted file: {FilePath}", filePath);
+
+        await Task.CompletedTask;
+    }
 }

@@ -65,10 +65,15 @@ public class WorkloadScheduler : IWorkloadScheduler
                 }
 
                 // Check if file should be processed for this workload type
-                if (await ShouldProcessFileAsync(file, repositoryPath, workloadType, cancellationToken))
+                var shouldProcess = await ShouldProcessFileAsync(file, repositoryPath, workloadType, cancellationToken);
+                if (shouldProcess)
                 {
                     selectedFiles.Add(file);
                     _logger.LogDebug("Selected file: {FilePath}", relativePath);
+                }
+                else
+                {
+                    _logger.LogDebug("Skipping file (does not need processing): {FilePath}", relativePath);
                 }
             }
             catch (Exception ex)
@@ -94,20 +99,11 @@ public class WorkloadScheduler : IWorkloadScheduler
 
             var filesInPRs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            // Extract file paths from branch names
-            // Branch naming convention: moonlight/{workload-type}/{relative-file-path}
-            var branchPrefix = $"moonlight/{workloadType}/";
-
-            foreach (var branch in openPRBranches)
-            {
-                if (branch.StartsWith(branchPrefix, StringComparison.OrdinalIgnoreCase))
-                {
-                    var filePath = branch.Substring(branchPrefix.Length);
-                    var normalizedPath = NormalizePath(filePath);
-                    filesInPRs.Add(normalizedPath);
-                    _logger.LogDebug("Found file in open PR: {FilePath}", filePath);
-                }
-            }
+            // Since we now use batch branches (moonlight/{timestamp}-code-documentation),
+            // we cannot determine individual files from branch names alone.
+            // For now, return empty set - future enhancement could query PR diff to get file list
+            _logger.LogDebug("Found {Count} open PR branches (batch mode - cannot determine individual files from branch names)",
+                openPRBranches.Count());
 
             return filesInPRs;
         }
@@ -153,17 +149,11 @@ public class WorkloadScheduler : IWorkloadScheduler
 
     private List<string> DiscoverCandidateFiles(string repositoryPath, string? projectPath)
     {
+        // Always search the entire repository, not just a single project
+        // The projectPath parameter is used for context but not for limiting scope
         var searchPath = repositoryPath;
 
-        // If projectPath is provided, limit scope to that project directory
-        if (!string.IsNullOrEmpty(projectPath))
-        {
-            var projectDir = Path.GetDirectoryName(Path.Combine(repositoryPath, projectPath));
-            if (!string.IsNullOrEmpty(projectDir) && Directory.Exists(projectDir))
-            {
-                searchPath = projectDir;
-            }
-        }
+        _logger.LogInformation("Searching entire repository: {SearchPath}", repositoryPath);
 
         // Find all C# files, excluding obj and bin directories
         var csFiles = Directory.GetFiles(searchPath, "*.cs", SearchOption.AllDirectories)
@@ -220,25 +210,34 @@ public class WorkloadScheduler : IWorkloadScheduler
                 return false;
             }
 
-            // Check if there are any public members without documentation
-            var needsDocumentation = analysis.Classes
-                .Where(c => c.Accessibility == "public")
-                .Any(c =>
-                    // Class itself needs documentation
-                    c.XmlDocumentation == null ||
-                    // Public methods need documentation
-                    c.Methods.Any(m => m.Accessibility == "public" && m.XmlDocumentation == null) ||
-                    // Public properties need documentation
-                    c.Properties.Any(p => p.Accessibility == "public" && p.XmlDocumentation == null) ||
-                    // Public const/readonly fields need documentation
-                    c.Fields.Any(f => f.Accessibility == "public" && (f.IsConst || f.IsReadOnly) && f.XmlDocumentation == null));
+            var publicClasses = analysis.Classes.Where(c => c.Accessibility == "public").ToList();
 
-            if (!needsDocumentation)
+            if (!publicClasses.Any())
             {
-                _logger.LogDebug("File already fully documented: {FilePath}", filePath);
+                _logger.LogDebug("Skipping file with no public classes: {FilePath}", filePath);
                 return false;
             }
 
+            // Check if there are any public members without documentation
+            var needsDocumentation = publicClasses.Any(c =>
+                // Class itself needs documentation
+                c.XmlDocumentation == null ||
+                // Public methods need documentation
+                c.Methods.Any(m => m.Accessibility == "public" && m.XmlDocumentation == null) ||
+                // Public properties need documentation
+                c.Properties.Any(p => p.Accessibility == "public" && p.XmlDocumentation == null) ||
+                // Public const/readonly fields need documentation
+                c.Fields.Any(f => f.Accessibility == "public" && (f.IsConst || f.IsReadOnly) && f.XmlDocumentation == null));
+
+            if (!needsDocumentation)
+            {
+                _logger.LogDebug("File already fully documented: {FilePath} ({ClassCount} public classes)",
+                    filePath, publicClasses.Count);
+                return false;
+            }
+
+            _logger.LogDebug("File needs documentation: {FilePath} ({ClassCount} public classes with missing docs)",
+                filePath, publicClasses.Count);
             return true;
         }
         catch (Exception ex)
