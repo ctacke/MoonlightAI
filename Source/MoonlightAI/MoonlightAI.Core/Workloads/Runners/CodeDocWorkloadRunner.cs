@@ -609,12 +609,17 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
 
         var warningsLogged = new List<string>();
 
+        // Track open tags to detect orphaned closing tags
+        var openTags = new Stack<string>();
+        var validXmlTags = new HashSet<string> { "summary", "remarks", "param", "returns", "exception", "example", "see", "seealso", "value", "typeparam" };
+
         foreach (var line in docLines)
         {
             var trimmedLine = line.Trim();
+            bool skipLine = false;
 
             // Check for <returns> tag on void methods - strip it out
-            if (isVoidMethod && trimmedLine.Contains("<returns>"))
+            if (isVoidMethod && (trimmedLine.Contains("<returns>") || trimmedLine.Contains("</returns>")))
             {
                 var warning = $"Stripped <returns> tag from void method {method.ReturnType}";
                 if (!warningsLogged.Contains(warning))
@@ -622,7 +627,7 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
                     _logger.LogWarning(warning);
                     warningsLogged.Add(warning);
                 }
-                continue; // Skip this line
+                skipLine = true;
             }
 
             // Check for hallucinated parameters - strip them out
@@ -638,12 +643,58 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
                         _logger.LogWarning(warning);
                         warningsLogged.Add(warning);
                     }
-                    continue; // Skip this line
+                    skipLine = true;
+                }
+            }
+
+            // Check for orphaned closing tags (closing tag without matching opening tag)
+            if (!skipLine)
+            {
+                // Find all opening and closing tags in this line
+                var openTagMatches = System.Text.RegularExpressions.Regex.Matches(trimmedLine, @"<(\w+)(?:\s|>)");
+                var closeTagMatches = System.Text.RegularExpressions.Regex.Matches(trimmedLine, @"</(\w+)>");
+
+                // Process opening tags
+                foreach (System.Text.RegularExpressions.Match match in openTagMatches)
+                {
+                    var tagName = match.Groups[1].Value;
+                    if (validXmlTags.Contains(tagName))
+                    {
+                        openTags.Push(tagName);
+                    }
+                }
+
+                // Process closing tags
+                foreach (System.Text.RegularExpressions.Match match in closeTagMatches)
+                {
+                    var tagName = match.Groups[1].Value;
+                    if (validXmlTags.Contains(tagName))
+                    {
+                        if (openTags.Count > 0 && openTags.Peek() == tagName)
+                        {
+                            openTags.Pop();
+                        }
+                        else
+                        {
+                            // Orphaned closing tag!
+                            var warning = $"Stripped orphaned closing tag </{tagName}> with no matching opening tag";
+                            if (!warningsLogged.Contains(warning))
+                            {
+                                _logger.LogWarning(warning);
+                                warningsLogged.Add(warning);
+                            }
+                            skipLine = true;
+                            break;
+                        }
+                    }
                 }
             }
 
             // Keep valid lines
-            sanitizedLines.Add(line);
+            if (!skipLine)
+            {
+                sanitizedLines.Add(line);
+            }
         }
 
         // Log warnings for missing documentation (but don't strip anything)
