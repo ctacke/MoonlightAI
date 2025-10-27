@@ -46,4 +46,13 @@ public interface IContainerManager
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>True if cleanup was successful, false otherwise.</returns>
     Task<bool> CleanupContainerAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Ensures the specified model is available in the container.
+    /// If the model is not present, it will be downloaded.
+    /// </summary>
+    /// <param name="modelName">Name of the model to ensure is available (e.g., "codellama:13b-instruct").</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>True if the model is available or was successfully downloaded, false otherwise.</returns>
+    Task<bool> EnsureModelAvailableAsync(string modelName, CancellationToken cancellationToken = default);
 }

@@ -278,6 +278,17 @@ public class WorkloadOrchestrator
                 return batchResult;
             }
 
+            // Step 0.55: Ensure model is available (download if needed)
+            _logger.LogInformation("Step 0.55: Ensuring model '{ModelName}' is available...", _aiServerConfig.ModelName);
+            var modelDownloaded = await _containerManager.EnsureModelAvailableAsync(_aiServerConfig.ModelName, cancellationToken);
+            if (!modelDownloaded)
+            {
+                _logger.LogError("Failed to ensure model '{ModelName}' is available", _aiServerConfig.ModelName);
+                batchResult.Success = false;
+                batchResult.Summary = $"Failed to download or verify model: {_aiServerConfig.ModelName}";
+                return batchResult;
+            }
+
             // Step 0.6: Verify model availability
             _logger.LogInformation("Step 0.6: Verifying AI model availability...");
             var modelValidation = await ValidateModelAvailabilityAsync(cancellationToken);
@@ -419,6 +430,7 @@ public class WorkloadOrchestrator
                     runRecord.TotalBuildRetries = results.Sum(r => r.Statistics?.BuildRetries ?? 0);
                     runRecord.TotalPromptTokens = results.Sum(r => r.Statistics?.TotalPromptTokens ?? 0);
                     runRecord.TotalResponseTokens = results.Sum(r => r.Statistics?.TotalResponseTokens ?? 0);
+                    runRecord.TotalSanitizationFixes = results.Sum(r => r.Statistics?.TotalSanitizationFixes ?? 0);
                     runRecord.PullRequestUrl = batchResult.PullRequestUrl;
                     runRecord.BranchName = branchName;
 
@@ -497,6 +509,17 @@ public class WorkloadOrchestrator
                 _logger.LogError("AI server is not responding");
                 batchResult.Success = false;
                 batchResult.Summary = "AI server is not responding to health checks";
+                return batchResult;
+            }
+
+            // Step 0.55: Ensure model is available (download if needed)
+            _logger.LogInformation("Step 0.55: Ensuring model '{ModelName}' is available...", _aiServerConfig.ModelName);
+            var modelDownloaded = await _containerManager.EnsureModelAvailableAsync(_aiServerConfig.ModelName, cancellationToken);
+            if (!modelDownloaded)
+            {
+                _logger.LogError("Failed to ensure model '{ModelName}' is available", _aiServerConfig.ModelName);
+                batchResult.Success = false;
+                batchResult.Summary = $"Failed to download or verify model: {_aiServerConfig.ModelName}";
                 return batchResult;
             }
 

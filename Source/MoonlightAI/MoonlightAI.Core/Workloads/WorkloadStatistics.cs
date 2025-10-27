@@ -93,4 +93,10 @@ public class WorkloadStatistics
     /// List of files that were skipped due to unfixable build errors.
     /// </summary>
     public List<string> SkippedFiles { get; set; } = new();
+
+    /// <summary>
+    /// Total number of sanitization fixes applied to AI responses (e.g., removing hallucinated parameters, fixing void return tags).
+    /// Higher values indicate more AI hallucinations that needed correction.
+    /// </summary>
+    public int TotalSanitizationFixes { get; set; }
 }

@@ -1,8 +1,8 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.Extensions.Logging;
-using System.Text;
 using MoonlightAI.Core.Build;
 using MoonlightAI.Core.Configuration;
+using System.Text;
 
 namespace MoonlightAI.Core.Workloads.Runners;
 
@@ -355,7 +355,7 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
         }
 
         // Validate and clean the documentation
-        var cleanedDocLines = SanitizeDocumentation(method, docLines);
+        var (cleanedDocLines, sanitizationFixCount) = SanitizeDocumentation(method, docLines);
         if (cleanedDocLines.Count == 0)
         {
             _logger.LogWarning("No valid documentation lines remain after sanitization for method {MethodName}",
@@ -371,6 +371,14 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
 
         // Use the sanitized documentation
         docLines = cleanedDocLines;
+
+        // Log and track sanitization fixes for quality tracking
+        if (sanitizationFixCount > 0)
+        {
+            _logger.LogInformation("Applied {FixCount} sanitization fix(es) to method {MethodName} documentation",
+                sanitizationFixCount, method.Name);
+            workload.Statistics.TotalSanitizationFixes += sanitizationFixCount;
+        }
 
         // Build new file content
         var sb = new StringBuilder();
@@ -600,7 +608,8 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
     /// <summary>
     /// Sanitizes documentation by removing invalid tags while keeping valid content.
     /// </summary>
-    private List<string> SanitizeDocumentation(Models.Analysis.MethodInfo method, List<string> docLines)
+    /// <returns>A tuple containing the sanitized lines and the count of fixes applied.</returns>
+    private (List<string> sanitizedLines, int fixCount) SanitizeDocumentation(Models.Analysis.MethodInfo method, List<string> docLines)
     {
         var sanitizedLines = new List<string>();
         var actualParamNames = method.Parameters.Select(p => p.Name).ToHashSet();
@@ -608,6 +617,7 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
                            method.ReturnType.Equals("Task", StringComparison.OrdinalIgnoreCase);
 
         var warningsLogged = new List<string>();
+        int fixCount = 0;
 
         // Track open tags to detect orphaned closing tags
         var openTags = new Stack<string>();
@@ -615,7 +625,9 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
 
         foreach (var line in docLines)
         {
-            var trimmedLine = line.Trim();
+            var trimmedLine = line
+                .Trim()
+                .TrimEnd('\\'); // sometime mistral likes to put a continuation character on lines
             bool skipLine = false;
 
             // Check for <returns> tag on void methods - strip it out
@@ -627,6 +639,7 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
                     _logger.LogWarning(warning);
                     warningsLogged.Add(warning);
                 }
+                fixCount++;
                 skipLine = true;
             }
 
@@ -643,6 +656,7 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
                         _logger.LogWarning(warning);
                         warningsLogged.Add(warning);
                     }
+                    fixCount++;
                     skipLine = true;
                 }
             }
@@ -683,6 +697,7 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
                                 _logger.LogWarning(warning);
                                 warningsLogged.Add(warning);
                             }
+                            fixCount++;
                             skipLine = true;
                             break;
                         }
@@ -715,7 +730,7 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
             }
         }
 
-        return sanitizedLines;
+        return (sanitizedLines, fixCount);
     }
 
     private async Task SaveFailedDocumentationAttemptAsync(

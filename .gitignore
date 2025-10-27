@@ -467,3 +467,6 @@ FodyWeavers.xsd
 *.db
 *.db-shm
 *.db-wal
+
+# MoonlightAI - Ollama model cache
+ollama-models/

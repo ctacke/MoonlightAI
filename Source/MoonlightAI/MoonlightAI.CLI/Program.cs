@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -11,6 +11,7 @@ using MoonlightAI.Core.Data;
 using MoonlightAI.Core.Git;
 using MoonlightAI.Core.Models;
 using MoonlightAI.Core.Orchestration;
+using MoonlightAI.Core.Reporting;
 using MoonlightAI.Core.Servers;
 using MoonlightAI.Core.Workloads;
 using MoonlightAI.Core.Workloads.Runners;
@@ -86,6 +87,9 @@ services.AddDbContext<MoonlightDbContext>(options =>
 });
 services.AddScoped<IDataService, SQLiteDataService>();
 
+// Register Reporting
+services.AddScoped<IReporter, ModelComparisonReporter>();
+
 // Register Core Services
 services.AddSingleton<WorkloadOrchestrator>();
 services.AddSingleton<IGitManager, GitManager>();
@@ -101,10 +105,6 @@ try
 {
     var logger = serviceProvider.GetRequiredService<ILogger<Program>>();
 
-    logger.LogInformation("MoonlightAI starting...");
-    logger.LogInformation("AI Server URL: {ServerUrl}", aiServerConfig.ServerUrl);
-    logger.LogInformation("Model: {ModelName}", aiServerConfig.ModelName);
-
     // Initialize database
     using (var scope = serviceProvider.CreateScope())
     {
@@ -112,18 +112,37 @@ try
         await dataService.InitializeAsync();
     }
 
-    var orchestrator = serviceProvider.GetRequiredService<WorkloadOrchestrator>();
-
-    // Execute code documentation for the repository
-    var result = await orchestrator.ExecuteCodeDocumentationAsync(
-        repositoryUrl: "https://github.com/LECS-Energy-LLC/solution-family",
-        projectPath: @"src\Engine\Modules\MQTT\SolutionEngine.MQTT.Module\SolutionEngine.MQTT.Module.csproj",
-        solutionPath: @"src\SolutionEngine.slnx");
-
-    logger.LogInformation("Code documentation completed: {Summary}", result.Summary);
-    if (!string.IsNullOrEmpty(result.PullRequestUrl))
+    // Main menu loop
+    bool exit = false;
+    while (!exit)
     {
-        logger.LogInformation("Pull Request: {PrUrl}", result.PullRequestUrl);
+        DisplayMainMenu(aiServerConfig, repoConfig, workloadConfig);
+
+        var choice = Console.ReadLine()?.Trim();
+
+        switch (choice)
+        {
+            case "1":
+                await ExecuteWorkloadAsync(serviceProvider, logger, aiServerConfig);
+                break;
+            case "2":
+                await DisplayComparisonReportAsync(serviceProvider, logger);
+                break;
+            case "3":
+                exit = true;
+                Console.WriteLine();
+                Console.ForegroundColor = ConsoleColor.Cyan;
+                Console.WriteLine("Goodbye!");
+                Console.ResetColor();
+                Console.WriteLine();
+                break;
+            default:
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine("Invalid option. Please select 1, 2, or 3.");
+                Console.ResetColor();
+                Console.WriteLine();
+                break;
+        }
     }
 }
 catch (Exception ex)
@@ -134,3 +153,88 @@ catch (Exception ex)
 }
 
 return 0;
+
+// Helper methods
+static void DisplayMainMenu(AIServerConfiguration aiServerConfig, RepositoryConfigurations repoConfig, WorkloadConfiguration workloadConfig)
+{
+    Console.Clear();
+    Console.ForegroundColor = ConsoleColor.Cyan;
+    Console.WriteLine("╔════════════════════════════════════════════════════════════════╗");
+    Console.WriteLine("║                  MoonlightAI - Main Menu                     ║");
+    Console.WriteLine("╚════════════════════════════════════════════════════════════════╝");
+    Console.ResetColor();
+    Console.WriteLine();
+
+    Console.ForegroundColor = ConsoleColor.Gray;
+    Console.WriteLine("Current Configuration:");
+    Console.WriteLine($"  Repository: {repoConfig.Repositories.FirstOrDefault()?.RepositoryUrl ?? "Not configured"}");
+    Console.WriteLine($"  Model: {aiServerConfig.ModelName}");
+    Console.WriteLine($"  Batch Size: {workloadConfig.BatchSize}");
+    Console.ResetColor();
+    Console.WriteLine();
+
+    Console.WriteLine("Options:");
+    Console.ForegroundColor = ConsoleColor.White;
+    Console.WriteLine("  [1] Run Code Documentation Workload");
+    Console.WriteLine("  [2] View Model Comparison Report");
+    Console.WriteLine("  [3] Exit");
+    Console.ResetColor();
+    Console.WriteLine();
+    Console.Write("Select option: ");
+}
+
+static async Task ExecuteWorkloadAsync(ServiceProvider serviceProvider, ILogger<Program> logger, AIServerConfiguration aiServerConfig)
+{
+    Console.WriteLine();
+    Console.ForegroundColor = ConsoleColor.Yellow;
+    Console.WriteLine("Starting workload execution...");
+    Console.ResetColor();
+    Console.WriteLine();
+
+    logger.LogInformation("MoonlightAI workload starting...");
+    logger.LogInformation("AI Server URL: {ServerUrl}", aiServerConfig.ServerUrl);
+    logger.LogInformation("Model: {ModelName}", aiServerConfig.ModelName);
+
+    var orchestrator = serviceProvider.GetRequiredService<WorkloadOrchestrator>();
+
+    // Execute code documentation for the repository
+    var result = await orchestrator.ExecuteCodeDocumentationAsync(
+        repositoryUrl: "https://github.com/LECS-Energy-LLC/solution-family",
+        projectPath: @"src\Engine\Modules\MQTT\SolutionEngine.MQTT.Module\SolutionEngine.MQTT.Module.csproj",
+        solutionPath: @"src\SolutionEngine.slnx");
+
+    Console.WriteLine();
+    Console.ForegroundColor = ConsoleColor.Green;
+    Console.WriteLine($"Workload completed: {result.Summary}");
+    Console.ResetColor();
+
+    if (!string.IsNullOrEmpty(result.PullRequestUrl))
+    {
+        Console.ForegroundColor = ConsoleColor.Cyan;
+        Console.WriteLine($"Pull Request: {result.PullRequestUrl}");
+        Console.ResetColor();
+    }
+
+    logger.LogInformation("Code documentation completed: {Summary}", result.Summary);
+    if (!string.IsNullOrEmpty(result.PullRequestUrl))
+    {
+        logger.LogInformation("Pull Request: {PrUrl}", result.PullRequestUrl);
+    }
+
+    Console.WriteLine();
+    Console.Write("Press any key to return to menu...");
+    Console.ReadKey();
+}
+
+static async Task DisplayComparisonReportAsync(ServiceProvider serviceProvider, ILogger<Program> logger)
+{
+    Console.Clear();
+    using (var scope = serviceProvider.CreateScope())
+    {
+        var reporter = scope.ServiceProvider.GetRequiredService<IReporter>();
+        await reporter.DisplayReportAsync();
+    }
+
+    Console.Write("Press any key to return to menu...");
+    Console.ReadKey();
+}

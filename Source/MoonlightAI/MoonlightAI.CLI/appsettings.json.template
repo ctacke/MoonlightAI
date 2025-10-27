@@ -9,6 +9,7 @@
     "ImageName": "moonlight-llm-server",
     "ContainerName": "moonlight-llm-server",
     "HostPort": 11434,
+    "ModelsPath": "./ollama-models",
     "AutoStart": true,
     "AutoStop": true,
     "PruneAfterStop": true
@@ -32,7 +33,7 @@
     "RevertOnBuildFailure": true
   },
   "Database": {
-    "DatabasePath": "./moonlight.db",
+    "DatabasePath": "F:\\repos\\ctacke\\MoonlightAI\\moonlight.db",
     "EnableDetailedLogging": false
   },
   "Logging": {

@@ -93,6 +93,12 @@ public class WorkloadRunRecord
     public long TotalResponseTokens { get; set; }
 
     /// <summary>
+    /// Total number of sanitization fixes applied to AI responses (e.g., removing hallucinated parameters, fixing void return tags).
+    /// Higher values indicate more AI hallucinations that needed correction.
+    /// </summary>
+    public int TotalSanitizationFixes { get; set; }
+
+    /// <summary>
     /// Pull request URL if created.
     /// </summary>
     public string? PullRequestUrl { get; set; }

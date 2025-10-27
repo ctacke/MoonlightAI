@@ -44,4 +44,10 @@ public class ContainerConfiguration
     /// Whether to prune the container after stopping to save resources.
     /// </summary>
     public bool PruneAfterStop { get; set; } = true;
+
+    /// <summary>
+    /// Path to the local folder containing Ollama models.
+    /// This folder will be mounted as a volume in the container.
+    /// </summary>
+    public string ModelsPath { get; set; } = "./ollama-models";
 }

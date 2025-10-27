@@ -90,17 +90,28 @@ public class DockerContainerManager : IContainerManager
                 // Container doesn't exist, create and run it from the image
                 _logger.LogInformation("Container '{ContainerName}' does not exist. Creating from image '{ImageName}'", _config.ContainerName, _config.ImageName);
 
-                // Run container with GPU support and port mapping
+                // Ensure models directory exists on host
+                var modelsPath = Path.GetFullPath(_config.ModelsPath);
+                if (!Directory.Exists(modelsPath))
+                {
+                    _logger.LogInformation("Creating models directory: {ModelsPath}", modelsPath);
+                    Directory.CreateDirectory(modelsPath);
+                }
+
+                // Convert Windows path to WSL/Linux path if needed
+                var volumePath = ConvertToDockerPath(modelsPath);
+
+                // Run container with GPU support, port mapping, and volume mount
                 // Note: No command specified - uses the ENTRYPOINT from Dockerfile (ollama serve)
                 var result = await ExecuteDockerCommandAsync(
-                    $"run -d --name {_config.ContainerName} --gpus all -p {_config.HostPort}:11434 --restart unless-stopped {_config.ImageName}",
+                    $"run -d --name {_config.ContainerName} --gpus all -p {_config.HostPort}:11434 -v \"{volumePath}:/root/.ollama/models\" --restart unless-stopped {_config.ImageName}",
                     cancellationToken);
 
                 var success = !string.IsNullOrWhiteSpace(result);
 
                 if (success)
                 {
-                    _logger.LogInformation("Container '{ContainerName}' created and started successfully with port mapping {HostPort}:11434", _config.ContainerName, _config.HostPort);
+                    _logger.LogInformation("Container '{ContainerName}' created and started successfully with port mapping {HostPort}:11434 and models volume mounted from {ModelsPath}", _config.ContainerName, _config.HostPort, volumePath);
                 }
                 else
                 {
@@ -226,6 +237,51 @@ public class DockerContainerManager : IContainerManager
         }
     }
 
+    /// <summary>
+    /// Ensures the specified model is available in the container.
+    /// If the model is not present, it will be downloaded.
+    /// </summary>
+    public async Task<bool> EnsureModelAvailableAsync(string modelName, CancellationToken cancellationToken = default)
+    {
+        if (!_config.UseLocalContainer)
+        {
+            _logger.LogDebug("Local container is not enabled, skipping model check");
+            return true;
+        }
+
+        try
+        {
+            _logger.LogInformation("Checking if model '{ModelName}' is available in container", modelName);
+
+            // List models in the container
+            var result = await ExecuteDockerCommandAsync(
+                $"exec {_config.ContainerName} ollama list",
+                cancellationToken);
+
+            // Check if model is in the list
+            if (result.Contains(modelName, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogInformation("Model '{ModelName}' is already available", modelName);
+                return true;
+            }
+
+            // Model not found, download it
+            _logger.LogInformation("Model '{ModelName}' not found. Downloading... (this may take several minutes)", modelName);
+
+            var pullResult = await ExecuteDockerCommandAsync(
+                $"exec {_config.ContainerName} ollama pull {modelName}",
+                cancellationToken);
+
+            _logger.LogInformation("Model '{ModelName}' download completed. Output: {Output}", modelName, pullResult);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error ensuring model '{ModelName}' is available", modelName);
+            return false;
+        }
+    }
+
     /// <inheritdoc/>
     public async Task<bool> CleanupContainerAsync(CancellationToken cancellationToken = default)
     {
@@ -329,5 +385,25 @@ public class DockerContainerManager : IContainerManager
         }
 
         return output.Trim();
+    }
+
+    /// <summary>
+    /// Converts a Windows path to a Docker-compatible path.
+    /// For Docker Desktop on Windows, preserves the Windows path format.
+    /// </summary>
+    private string ConvertToDockerPath(string path)
+    {
+        // Docker Desktop on Windows handles Windows paths directly
+        // Just normalize the separators to forward slashes
+        // Example: R:\ollama-models becomes R:/ollama-models (NOT /mnt/r/ollama-models)
+        if (Path.DirectorySeparatorChar == '\\')
+        {
+            // Keep the drive letter format (e.g., R:/ollama-models)
+            // Docker Desktop will handle the mount translation internally
+            return path.Replace('\\', '/');
+        }
+
+        // Already a Unix-style path
+        return path;
     }
 }

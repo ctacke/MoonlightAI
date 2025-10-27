@@ -61,4 +61,10 @@ public class AIInteractionRecord
     /// For build fixes, the attempt number.
     /// </summary>
     public int? BuildFixAttempt { get; set; }
+
+    /// <summary>
+    /// Number of sanitization fixes applied to the AI response (e.g., removing invalid param tags, fixing void return tags).
+    /// This tracks how many corrections were needed to make the AI output valid.
+    /// </summary>
+    public int SanitizationFixesApplied { get; set; }
 }

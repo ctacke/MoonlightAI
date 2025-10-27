@@ -1,17 +1,16 @@
 ﻿# Base Ollama image (includes CUDA support for NVIDIA GPUs)
 FROM ollama/ollama:latest
 
-LABEL purpose="GPU-accelerated CodeLlama image for C# code generation"
+LABEL purpose="GPU-accelerated Ollama server with volume-mounted model storage"
 
 # Set up environment for NVIDIA GPU support
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
 ENV OLLAMA_MODELS=/root/.ollama/models
 
-# Pre-pull the CodeLlama model. 13b-instruct is good for C# code gen and will fit on my RTX3060
-# 34b-instruct is better but requires more VRAM, requiring a better GPU.
-# 7b-instruct is faster but less capable, and since we run at night, speed is less of a concern.
-RUN ollama serve & sleep 5 && ollama pull codellama:13b-instruct && pkill ollama
+# Note: Models are stored in a volume-mounted directory from the host.
+# This allows switching between models without rebuilding the image.
+# Models are automatically downloaded by the application if not present.
 
 # Expose Ollama's API port
 EXPOSE 11434
