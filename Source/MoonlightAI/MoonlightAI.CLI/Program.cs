@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using MoonlightAI.CLI.UI;
 using MoonlightAI.Core;
 using MoonlightAI.Core.Analysis;
 using MoonlightAI.Core.Build;
@@ -23,44 +24,46 @@ var configuration = new ConfigurationBuilder()
     .AddJsonFile($"appsettings.{Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") ?? "Production"}.json", optional: true)
     .Build();
 
+// Bind configurations
+var aiServerConfig = new AIServerConfiguration();
+configuration.GetSection(AIServerConfiguration.SectionName).Bind(aiServerConfig);
+
+var gitHubConfig = new GitHubConfiguration();
+configuration.GetSection(GitHubConfiguration.SectionName).Bind(gitHubConfig);
+
+var repoConfig = new RepositoryConfigurations
+{
+    Repositories = configuration.GetSection("Repositories").Get<List<RepositoryConfiguration>>() ?? new List<RepositoryConfiguration>()
+};
+
+var containerConfig = new ContainerConfiguration();
+configuration.GetSection(ContainerConfiguration.SectionName).Bind(containerConfig);
+
+var workloadConfig = new WorkloadConfiguration();
+configuration.GetSection(WorkloadConfiguration.SectionName).Bind(workloadConfig);
+
+var databaseConfig = new DatabaseConfiguration();
+configuration.GetSection(DatabaseConfiguration.SectionName).Bind(databaseConfig);
+
+// Create Terminal UI
+using var ui = new MoonlightTerminalUI(aiServerConfig, repoConfig, workloadConfig, containerConfig, databaseConfig);
+
 // Configure services
 var services = new ServiceCollection();
 
-// Add logging
+// Add logging with Terminal UI logger
 services.AddLogging(builder =>
 {
-    builder.AddConsole();
-    builder.AddConfiguration(configuration.GetSection("Logging"));
+    builder.AddProvider(new TerminalUILoggerProvider(ui, LogLevel.Information));
+    builder.SetMinimumLevel(LogLevel.Information);
 });
 
-// Bind AI Server configuration
-var aiServerConfig = new AIServerConfiguration();
-configuration.GetSection(AIServerConfiguration.SectionName).Bind(aiServerConfig);
+// Register configurations
 services.AddSingleton(aiServerConfig);
-
-// Bind Github configuration
-var gitHubConfig = new GitHubConfiguration();
-configuration.GetSection(GitHubConfiguration.SectionName).Bind(gitHubConfig);
 services.AddSingleton(gitHubConfig);
-
-// Bind Repository configuration
-var repoConfig = new RepositoryConfigurations();
-configuration.GetSection(RepositoryConfigurations.SectionName).Bind(repoConfig);
 services.AddSingleton(repoConfig);
-
-// Bind Container configuration
-var containerConfig = new ContainerConfiguration();
-configuration.GetSection(ContainerConfiguration.SectionName).Bind(containerConfig);
 services.AddSingleton(containerConfig);
-
-// Bind Workload configuration
-var workloadConfig = new WorkloadConfiguration();
-configuration.GetSection(WorkloadConfiguration.SectionName).Bind(workloadConfig);
 services.AddSingleton(workloadConfig);
-
-// Bind Database configuration
-var databaseConfig = new DatabaseConfiguration();
-configuration.GetSection(DatabaseConfiguration.SectionName).Bind(databaseConfig);
 services.AddSingleton(databaseConfig);
 
 // Register HttpClient and AI Server
@@ -100,141 +103,303 @@ services.AddSingleton<CodeDocWorkloadRunner>();
 // Build service provider
 var serviceProvider = services.BuildServiceProvider();
 
-// Run the application
+// Cancellation token holder for workload cancellation
+var cancellationHolder = new WorkloadCancellationHolder();
+
+// Initialize database
 try
 {
-    var logger = serviceProvider.GetRequiredService<ILogger<Program>>();
-
-    // Initialize database
     using (var scope = serviceProvider.CreateScope())
     {
         var dataService = scope.ServiceProvider.GetRequiredService<IDataService>();
         await dataService.InitializeAsync();
-    }
 
-    // Main menu loop
-    bool exit = false;
-    while (!exit)
-    {
-        DisplayMainMenu(aiServerConfig, repoConfig, workloadConfig);
+        ui.AppendLog("Database initialized successfully");
 
-        var choice = Console.ReadLine()?.Trim();
-
-        switch (choice)
+        // Load initial model statistics for the configured model
+        var modelComparison = await dataService.GetModelComparisonAsync();
+        if (modelComparison.TryGetValue(aiServerConfig.ModelName, out var modelStats))
         {
-            case "1":
-                await ExecuteWorkloadAsync(serviceProvider, logger, aiServerConfig);
-                break;
-            case "2":
-                await DisplayComparisonReportAsync(serviceProvider, logger);
-                break;
-            case "3":
-                exit = true;
-                Console.WriteLine();
-                Console.ForegroundColor = ConsoleColor.Cyan;
-                Console.WriteLine("Goodbye!");
-                Console.ResetColor();
-                Console.WriteLine();
-                break;
-            default:
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine("Invalid option. Please select 1, 2, or 3.");
-                Console.ResetColor();
-                Console.WriteLine();
-                break;
+            ui.UpdateModelStatistics(modelStats);
         }
     }
 }
 catch (Exception ex)
 {
-    var logger = serviceProvider.GetRequiredService<ILogger<Program>>();
-    logger.LogError(ex, "An error occurred while running MoonlightAI.");
+    ui.AppendLog($"ERROR: Failed to initialize database: {ex.Message}");
+    ui.AppendLog("Press Ctrl+C to exit");
+    ui.Run();
     return 1;
 }
 
+// Handle commands from UI
+ui.CommandEntered += async (sender, command) =>
+{
+    await HandleCommandAsync(command, ui, serviceProvider, cancellationHolder);
+};
+
+// Show welcome message
+ui.AppendLog("═══════════════════════════════════════════════════════════════");
+ui.AppendLog("  MoonlightAI - AI-Powered Code Documentation");
+ui.AppendLog("═══════════════════════════════════════════════════════════════");
+ui.AppendLog("");
+ui.AppendLog("Available Commands:");
+ui.AppendLog("  run      - Run code documentation workload");
+ui.AppendLog("  stop     - Stop current workload (saves completed work)");
+ui.AppendLog("  report   - View model comparison report");
+ui.AppendLog("  stats    - Show current statistics");
+ui.AppendLog("  clear    - Clear log output");
+ui.AppendLog("  exit     - Exit application");
+ui.AppendLog("");
+ui.AppendLog("Type a command and press Enter to execute.");
+ui.AppendLog("═══════════════════════════════════════════════════════════════");
+
+// Run the Terminal UI
+ui.Run();
+
 return 0;
 
-// Helper methods
-static void DisplayMainMenu(AIServerConfiguration aiServerConfig, RepositoryConfigurations repoConfig, WorkloadConfiguration workloadConfig)
+// Command handler
+static async Task HandleCommandAsync(string command, MoonlightTerminalUI ui, ServiceProvider serviceProvider, WorkloadCancellationHolder cancellationHolder)
 {
-    Console.Clear();
-    Console.ForegroundColor = ConsoleColor.Cyan;
-    Console.WriteLine("╔════════════════════════════════════════════════════════════════╗");
-    Console.WriteLine("║                  MoonlightAI - Main Menu                     ║");
-    Console.WriteLine("╚════════════════════════════════════════════════════════════════╝");
-    Console.ResetColor();
-    Console.WriteLine();
+    var cmd = command.Trim().ToLowerInvariant();
 
-    Console.ForegroundColor = ConsoleColor.Gray;
-    Console.WriteLine("Current Configuration:");
-    Console.WriteLine($"  Repository: {repoConfig.Repositories.FirstOrDefault()?.RepositoryUrl ?? "Not configured"}");
-    Console.WriteLine($"  Model: {aiServerConfig.ModelName}");
-    Console.WriteLine($"  Batch Size: {workloadConfig.BatchSize}");
-    Console.ResetColor();
-    Console.WriteLine();
+    try
+    {
+        switch (cmd)
+        {
+            case "run":
+                if (cancellationHolder.CancellationTokenSource != null)
+                {
+                    ui.AppendLog("ERROR: A workload is already running. Use 'stop' to cancel it first.");
+                    break;
+                }
+                cancellationHolder.CancellationTokenSource = new CancellationTokenSource();
+                await ExecuteWorkloadAsync(ui, serviceProvider, cancellationHolder.CancellationTokenSource.Token);
+                cancellationHolder.CancellationTokenSource?.Dispose();
+                cancellationHolder.CancellationTokenSource = null;
+                break;
 
-    Console.WriteLine("Options:");
-    Console.ForegroundColor = ConsoleColor.White;
-    Console.WriteLine("  [1] Run Code Documentation Workload");
-    Console.WriteLine("  [2] View Model Comparison Report");
-    Console.WriteLine("  [3] Exit");
-    Console.ResetColor();
-    Console.WriteLine();
-    Console.Write("Select option: ");
+            case "stop":
+                if (cancellationHolder.CancellationTokenSource == null)
+                {
+                    ui.AppendLog("No workload is currently running.");
+                }
+                else
+                {
+                    ui.AppendLog("Requesting workload cancellation...");
+                    ui.AppendLog("Completing current file and saving progress...");
+                    cancellationHolder.CancellationTokenSource.Cancel();
+                }
+                break;
+
+            case "report":
+                await DisplayComparisonReportAsync(ui, serviceProvider);
+                break;
+
+            case "stats":
+                await DisplayStatisticsAsync(ui, serviceProvider);
+                break;
+
+            case "clear":
+                // Clear log - this is a bit tricky with Terminal.Gui, so we'll just add a separator
+                ui.AppendLog("");
+                ui.AppendLog("═══════════════════════════════════════════════════════════════");
+                ui.AppendLog("");
+                break;
+
+            case "exit":
+            case "quit":
+                ui.AppendLog("Shutting down MoonlightAI...");
+                ui.Stop();
+                break;
+
+            case "help":
+            case "?":
+                ui.AppendLog("");
+                ui.AppendLog("Available Commands:");
+                ui.AppendLog("  run      - Run code documentation workload");
+                ui.AppendLog("  stop     - Stop current workload (saves completed work)");
+                ui.AppendLog("  report   - View model comparison report");
+                ui.AppendLog("  stats    - Show current statistics");
+                ui.AppendLog("  clear    - Clear log output");
+                ui.AppendLog("  exit     - Exit application");
+                ui.AppendLog("");
+                break;
+
+            default:
+                ui.AppendLog($"Unknown command: '{command}'. Type 'help' for available commands.");
+                break;
+        }
+    }
+    catch (Exception ex)
+    {
+        ui.AppendLog($"ERROR: {ex.Message}");
+    }
 }
 
-static async Task ExecuteWorkloadAsync(ServiceProvider serviceProvider, ILogger<Program> logger, AIServerConfiguration aiServerConfig)
+static async Task ExecuteWorkloadAsync(MoonlightTerminalUI ui, ServiceProvider serviceProvider, CancellationToken cancellationToken)
 {
-    Console.WriteLine();
-    Console.ForegroundColor = ConsoleColor.Yellow;
-    Console.WriteLine("Starting workload execution...");
-    Console.ResetColor();
-    Console.WriteLine();
+    ui.SetStatus("Running workload... (type 'stop' to cancel)");
+    ui.AppendLog("Starting code documentation workload...");
 
-    logger.LogInformation("MoonlightAI workload starting...");
-    logger.LogInformation("AI Server URL: {ServerUrl}", aiServerConfig.ServerUrl);
-    logger.LogInformation("Model: {ModelName}", aiServerConfig.ModelName);
+    // Get initial statistics
+    int initialRunCount = 0;
+    int initialFileCount = 0;
+    using (var scope = serviceProvider.CreateScope())
+    {
+        var dataService = scope.ServiceProvider.GetRequiredService<IDataService>();
+        var allRuns = await dataService.GetAllRunsAsync();
+        initialRunCount = allRuns.Count;
+        initialFileCount = allRuns.Sum(r => r.FilesSuccessful + r.FilesFailed);
+    }
 
     var orchestrator = serviceProvider.GetRequiredService<WorkloadOrchestrator>();
 
-    // Execute code documentation for the repository
-    var result = await orchestrator.ExecuteCodeDocumentationAsync(
-        repositoryUrl: "https://github.com/LECS-Energy-LLC/solution-family",
-        projectPath: @"src\Engine\Modules\MQTT\SolutionEngine.MQTT.Module\SolutionEngine.MQTT.Module.csproj",
-        solutionPath: @"src\SolutionEngine.slnx");
-
-    Console.WriteLine();
-    Console.ForegroundColor = ConsoleColor.Green;
-    Console.WriteLine($"Workload completed: {result.Summary}");
-    Console.ResetColor();
-
-    if (!string.IsNullOrEmpty(result.PullRequestUrl))
+    // Track progress during execution
+    int filesProcessedThisRun = 0;
+    int batchTotal = 0;
+    var progressCallback = new Progress<int>(value =>
     {
-        Console.ForegroundColor = ConsoleColor.Cyan;
-        Console.WriteLine($"Pull Request: {result.PullRequestUrl}");
-        Console.ResetColor();
+        // Negative value indicates batch total (sent at start)
+        if (value < 0)
+        {
+            batchTotal = -value;
+            ui.UpdateBatchProgress(0, batchTotal);
+        }
+        else
+        {
+            // Positive value indicates files completed
+            filesProcessedThisRun = value;
+            ui.UpdateStatistics(initialRunCount + 1, initialFileCount + filesProcessedThisRun);
+            ui.UpdateBatchProgress(filesProcessedThisRun, batchTotal);
+        }
+    });
+
+    try
+    {
+        // Execute code documentation for the repository with progress updates
+        var result = await orchestrator.ExecuteCodeDocumentationAsync(
+            repositoryUrl: "https://github.com/LECS-Energy-LLC/solution-family",
+            projectPath: @"src\Engine\Modules\MQTT\SolutionEngine.MQTT.Module\SolutionEngine.MQTT.Module.csproj",
+            solutionPath: @"src\SolutionEngine.slnx",
+            progress: progressCallback,
+            cancellationToken: cancellationToken);
+
+        ui.AppendLog("");
+        if (cancellationToken.IsCancellationRequested)
+        {
+            ui.AppendLog($"Workload STOPPED by user: {result.Summary}");
+        }
+        else
+        {
+            ui.AppendLog($"Workload completed: {result.Summary}");
+        }
+
+        if (!string.IsNullOrEmpty(result.PullRequestUrl))
+        {
+            ui.AppendLog($"Pull Request: {result.PullRequestUrl}");
+        }
+    }
+    catch (OperationCanceledException)
+    {
+        ui.AppendLog("");
+        ui.AppendLog("Workload cancelled. Completed files have been saved and committed.");
+    }
+    catch (Exception ex)
+    {
+        ui.AppendLog("");
+        ui.AppendLog($"ERROR: {ex.Message}");
     }
 
-    logger.LogInformation("Code documentation completed: {Summary}", result.Summary);
-    if (!string.IsNullOrEmpty(result.PullRequestUrl))
-    {
-        logger.LogInformation("Pull Request: {PrUrl}", result.PullRequestUrl);
-    }
+    ui.SetStatus("Idle");
+    ui.ClearBatchProgress();
 
-    Console.WriteLine();
-    Console.Write("Press any key to return to menu...");
-    Console.ReadKey();
-}
-
-static async Task DisplayComparisonReportAsync(ServiceProvider serviceProvider, ILogger<Program> logger)
-{
-    Console.Clear();
+    // Final statistics and model stats update from database
     using (var scope = serviceProvider.CreateScope())
     {
-        var reporter = scope.ServiceProvider.GetRequiredService<IReporter>();
-        await reporter.DisplayReportAsync();
+        var dataService = scope.ServiceProvider.GetRequiredService<IDataService>();
+        var allRuns = await dataService.GetAllRunsAsync();
+        var totalFiles = allRuns.Sum(r => r.FilesSuccessful + r.FilesFailed);
+        ui.UpdateStatistics(allRuns.Count, totalFiles);
+
+        // Refresh model statistics after run completes
+        var modelComparison = await dataService.GetModelComparisonAsync();
+        if (modelComparison.TryGetValue(serviceProvider.GetRequiredService<AIServerConfiguration>().ModelName, out var modelStats))
+        {
+            ui.UpdateModelStatistics(modelStats);
+        }
+    }
+}
+
+static async Task DisplayComparisonReportAsync(MoonlightTerminalUI ui, ServiceProvider serviceProvider)
+{
+    ui.AppendLog("");
+    ui.AppendLog("═══════════════════════════════════════════════════════════════");
+    ui.AppendLog("              Model Comparison Report");
+    ui.AppendLog("═══════════════════════════════════════════════════════════════");
+
+    using (var scope = serviceProvider.CreateScope())
+    {
+        var dataService = scope.ServiceProvider.GetRequiredService<IDataService>();
+        var comparison = await dataService.GetModelComparisonAsync();
+
+        if (!comparison.Any())
+        {
+            ui.AppendLog("No workload runs found in database.");
+            ui.AppendLog("Run a workload first to see comparison data.");
+            return;
+        }
+
+        var sortedModels = comparison.Values.OrderByDescending(m => m.SuccessRate).ToList();
+
+        ui.AppendLog("");
+        ui.AppendLog($"{"Model",-30} {"Runs",6} {"Success",8} {"Files",7} {"Failures",9} {"SanitFix",9}");
+        ui.AppendLog(new string('-', 80));
+
+        foreach (var model in sortedModels)
+        {
+            var line = $"{model.ModelName,-30} " +
+                      $"{model.TotalRuns,6} " +
+                      $"{model.SuccessRate,7:F1}% " +
+                      $"{model.TotalFilesProcessed,7} " +
+                      $"{model.TotalBuildFailures,9} " +
+                      $"{model.AverageSanitizationFixesPerFile,9:F2}";
+
+            ui.AppendLog(line);
+        }
+
+        ui.AppendLog("");
+        ui.AppendLog("Legend: SanitFix = Avg sanitization fixes per file (hallucinations)");
     }
 
-    Console.Write("Press any key to return to menu...");
-    Console.ReadKey();
+    ui.AppendLog("═══════════════════════════════════════════════════════════════");
+    ui.AppendLog("");
+}
+
+static async Task DisplayStatisticsAsync(MoonlightTerminalUI ui, ServiceProvider serviceProvider)
+{
+    using (var scope = serviceProvider.CreateScope())
+    {
+        var dataService = scope.ServiceProvider.GetRequiredService<IDataService>();
+        var allRuns = await dataService.GetAllRunsAsync();
+
+        ui.AppendLog("");
+        ui.AppendLog("═══════════════════════════════════════════════════════════════");
+        ui.AppendLog("              Current Statistics");
+        ui.AppendLog("═══════════════════════════════════════════════════════════════");
+        ui.AppendLog($"Total Runs: {allRuns.Count}");
+        ui.AppendLog($"Successful Runs: {allRuns.Count(r => r.Success)}");
+        ui.AppendLog($"Failed Runs: {allRuns.Count(r => !r.Success)}");
+        ui.AppendLog($"Total Files Processed: {allRuns.Sum(r => r.FilesSuccessful + r.FilesFailed)}");
+        ui.AppendLog($"Total Sanitization Fixes: {allRuns.Sum(r => r.TotalSanitizationFixes)}");
+        ui.AppendLog("═══════════════════════════════════════════════════════════════");
+        ui.AppendLog("");
+    }
+}
+
+// Helper class to hold cancellation token source
+class WorkloadCancellationHolder
+{
+    public CancellationTokenSource? CancellationTokenSource { get; set; }
 }

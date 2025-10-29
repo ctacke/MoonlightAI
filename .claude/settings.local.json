@@ -6,7 +6,8 @@
       "Bash(dotnet sln:*)",
       "Bash(dotnet build:*)",
       "Bash(docker ps:*)",
-      "Read(//mnt/r/ollama-models/**)"
+      "Read(//mnt/r/ollama-models/**)",
+      "Bash(dotnet add:*)"
     ],
     "deny": [],
     "ask": []

@@ -209,6 +209,7 @@ public class WorkloadOrchestrator
         string repositoryUrl,
         string? projectPath = null,
         string? solutionPath = null,
+        IProgress<int>? progress = null,
         CancellationToken cancellationToken = default)
     {
         var results = new List<WorkloadResult>();
@@ -340,6 +341,9 @@ public class WorkloadOrchestrator
             // Step 4: Execute workloads serially (one at a time) for each file
             _logger.LogInformation("Step 4: Processing {Count} files serially...", filesToDocument.Count);
 
+            // Report initial batch size to progress callback (using -1 to indicate batch total)
+            progress?.Report(-filesToDocument.Count);
+
             foreach (var filePath in filesToDocument)
             {
                 // Create workload for this file
@@ -367,6 +371,9 @@ public class WorkloadOrchestrator
                         allModifiedFiles.AddRange(result.ModifiedFiles);
                         successfulWorkloads++;
                     }
+
+                    // Report progress after each file completes
+                    progress?.Report(results.Count);
                 }
                 catch (Exception ex)
                 {
@@ -377,6 +384,17 @@ public class WorkloadOrchestrator
                         State = WorkloadState.Failed,
                         Summary = $"Workload execution failed: {ex.Message}"
                     });
+
+                    // Report progress even for failed files
+                    progress?.Report(results.Count);
+                }
+
+                // Check for cancellation after each file completes
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    _logger.LogWarning("Workload cancellation requested. Processed {Count} of {Total} files. Saving completed work...",
+                        results.Count, filesToDocument.Count);
+                    break;
                 }
             }
 
