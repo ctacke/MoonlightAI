@@ -239,6 +239,11 @@ public class WorkloadScheduler : IWorkloadScheduler
                 totalDocumentableItems += publicProperties.Count;
                 undocumentedItems += publicProperties.Count(p => p.XmlDocumentation == null);
 
+                // Count public events
+                var publicEvents = c.Events.Where(e => e.Accessibility == "public").ToList();
+                totalDocumentableItems += publicEvents.Count;
+                undocumentedItems += publicEvents.Count(e => e.XmlDocumentation == null);
+
                 // Count public const/readonly fields
                 var publicFields = c.Fields.Where(f => f.Accessibility == "public" && (f.IsConst || f.IsReadOnly)).ToList();
                 totalDocumentableItems += publicFields.Count;

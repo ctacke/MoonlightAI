@@ -217,16 +217,50 @@ public class RoslynCodeAnalyzer : ICodeAnalyzer
             classInfo.Fields.AddRange(fieldInfos);
         }
 
+        // Analyze events
+        var events = classDecl.Members.OfType<EventFieldDeclarationSyntax>();
+        foreach (var evt in events)
+        {
+            var eventInfos = AnalyzeEvent(evt, syntaxTree);
+            classInfo.Events.AddRange(eventInfos);
+        }
+
         return classInfo;
     }
 
     private Models.Analysis.PropertyInfo AnalyzeProperty(PropertyDeclarationSyntax propDecl, SyntaxTree syntaxTree)
     {
+        var propertyAccessibility = GetAccessibility(propDecl.Modifiers);
+
+        // Check if any accessor is public - properties with public get/private set should be considered public
+        var hasPublicAccessor = false;
+        if (propDecl.AccessorList != null)
+        {
+            foreach (var accessor in propDecl.AccessorList.Accessors)
+            {
+                // Get explicit accessor modifier, or use property-level if none
+                var accessorAccessibility = accessor.Modifiers.Any()
+                    ? GetAccessibility(accessor.Modifiers)
+                    : propertyAccessibility;
+
+                if (accessorAccessibility == "public")
+                {
+                    hasPublicAccessor = true;
+                    break;
+                }
+            }
+        }
+
+        // If property itself is public or has a public accessor, mark as public
+        var effectiveAccessibility = (propertyAccessibility == "public" || hasPublicAccessor)
+            ? "public"
+            : propertyAccessibility;
+
         return new Models.Analysis.PropertyInfo
         {
             Name = propDecl.Identifier.Text,
             PropertyType = propDecl.Type.ToString(),
-            Accessibility = GetAccessibility(propDecl.Modifiers),
+            Accessibility = effectiveAccessibility,
             FirstLineNumber = syntaxTree.GetLineSpan(propDecl.Span).StartLinePosition.Line + 1,
             XmlDocumentation = GetXmlDocumentation(propDecl),
             HasGetter = propDecl.AccessorList?.Accessors.Any(a => a.IsKind(SyntaxKind.GetAccessorDeclaration)) ?? false,
@@ -292,6 +326,30 @@ public class RoslynCodeAnalyzer : ICodeAnalyzer
         }
 
         return fields;
+    }
+
+    private List<Models.Analysis.EventInfo> AnalyzeEvent(EventFieldDeclarationSyntax eventDecl, SyntaxTree syntaxTree)
+    {
+        var events = new List<Models.Analysis.EventInfo>();
+        var accessibility = GetAccessibility(eventDecl.Modifiers);
+        var xmlDoc = GetXmlDocumentation(eventDecl);
+
+        // An event declaration can declare multiple events at once (like fields)
+        foreach (var variable in eventDecl.Declaration.Variables)
+        {
+            var eventInfo = new Models.Analysis.EventInfo
+            {
+                Name = variable.Identifier.Text,
+                EventType = eventDecl.Declaration.Type.ToString(),
+                Accessibility = accessibility,
+                FirstLineNumber = syntaxTree.GetLineSpan(variable.Span).StartLinePosition.Line + 1,
+                XmlDocumentation = xmlDoc
+            };
+
+            events.Add(eventInfo);
+        }
+
+        return events;
     }
 
     private string GetAccessibility(SyntaxTokenList modifiers)

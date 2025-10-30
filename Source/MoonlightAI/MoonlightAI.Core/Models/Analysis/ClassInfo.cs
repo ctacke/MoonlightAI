@@ -46,6 +46,11 @@ public class ClassInfo
     public List<FieldInfo> Fields { get; set; } = new();
 
     /// <summary>
+    /// Events in the class.
+    /// </summary>
+    public List<EventInfo> Events { get; set; } = new();
+
+    /// <summary>
     /// Whether the class is static.
     /// </summary>
     public bool IsStatic { get; set; }
