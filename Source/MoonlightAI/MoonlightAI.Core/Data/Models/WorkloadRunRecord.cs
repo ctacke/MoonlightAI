@@ -93,6 +93,11 @@ public class WorkloadRunRecord
     public long TotalResponseTokens { get; set; }
 
     /// <summary>
+    /// Total number of items (methods, properties, fields, classes) documented across all files.
+    /// </summary>
+    public int TotalItemsDocumented { get; set; }
+
+    /// <summary>
     /// Total number of sanitization fixes applied to AI responses (e.g., removing hallucinated parameters, fixing void return tags).
     /// Higher values indicate more AI hallucinations that needed correction.
     /// </summary>

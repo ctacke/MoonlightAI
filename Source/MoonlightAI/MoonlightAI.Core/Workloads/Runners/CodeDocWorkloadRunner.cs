@@ -1,4 +1,3 @@
-using Microsoft.CodeAnalysis;
 using Microsoft.Extensions.Logging;
 using MoonlightAI.Core.Build;
 using MoonlightAI.Core.Configuration;
@@ -129,6 +128,13 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
             result.CommitMessage = GenerateCommitMessage(workload, result);
             result.PullRequestTitle = GeneratePRTitle(workload, result);
             result.PullRequestBody = GeneratePRBody(workload, result);
+
+            // Diagnostic logging for statistics
+            _logger.LogInformation("Workload stats for {File}: Sanitization={Sanit}, PromptTokens={Prompt}, ResponseTokens={Response}",
+                Path.GetFileName(workload.FilePath),
+                workload.Statistics.TotalSanitizationFixes,
+                workload.Statistics.TotalPromptTokens,
+                workload.Statistics.TotalResponseTokens);
 
             _logger.LogInformation("Code documentation workload completed: {Summary}", result.Summary);
         }
@@ -625,9 +631,9 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
 
         foreach (var line in docLines)
         {
-            var trimmedLine = line
-                .Trim()
-                .TrimEnd('\\'); // sometime mistral likes to put a continuation character on lines
+            // Remove trailing backslashes that AI sometimes adds
+            var cleanedLine = line.TrimEnd('\\');
+            var trimmedLine = cleanedLine.Trim();
             bool skipLine = false;
 
             // Check for <returns> tag on void methods - strip it out
@@ -708,7 +714,7 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
             // Keep valid lines
             if (!skipLine)
             {
-                sanitizedLines.Add(line);
+                sanitizedLines.Add(cleanedLine);
             }
         }
 

@@ -248,6 +248,7 @@ public class GitManager : IGitManager
         try
         {
             _logger.LogInformation("Creating pull request for branch {BranchName} in {Owner}/{Name}...", branchName, repository.Owner, repository.Name);
+            _logger.LogInformation("PR Details - Head: {Head}, Base: {Base}, Title: {Title}", branchName, _config.DefaultBranch, title);
 
             var newPr = new NewPullRequest(title, branchName, _config.DefaultBranch)
             {
@@ -258,6 +259,23 @@ public class GitManager : IGitManager
 
             _logger.LogInformation("Created pull request #{Number}: {Url}", pullRequest.Number, pullRequest.HtmlUrl);
             return pullRequest.HtmlUrl;
+        }
+        catch (Octokit.ApiValidationException validationEx)
+        {
+            _logger.LogError("GitHub API validation failed for PR creation:");
+            _logger.LogError("  Branch: {Branch}", branchName);
+            _logger.LogError("  Base: {Base}", _config.DefaultBranch);
+            _logger.LogError("  Repo: {Owner}/{Name}", repository.Owner, repository.Name);
+            _logger.LogError("  Message: {Message}", validationEx.Message);
+            if (validationEx.ApiError?.Errors != null)
+            {
+                foreach (var error in validationEx.ApiError.Errors)
+                {
+                    _logger.LogError("  Error: {Resource} - {Field}: {Code} - {Message}",
+                        error.Resource, error.Field, error.Code, error.Message);
+                }
+            }
+            throw;
         }
         catch (Exception ex)
         {

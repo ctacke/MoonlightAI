@@ -88,7 +88,7 @@ public class ModelComparisonReporter : IReporter
                 // Highlight sanitization fixes in magenta if > 0 (indicates hallucinations)
                 if (model.TotalSanitizationFixes > 0)
                     Console.ForegroundColor = ConsoleColor.Magenta;
-                Console.Write($"{model.AverageSanitizationFixesPerFile,9:F2} ");
+                Console.Write($"{model.AverageSanitizationFixesPerItem,9:F2} ");
                 Console.ResetColor();
 
                 Console.WriteLine($"{model.AverageTokensPerFile,12:N0}");

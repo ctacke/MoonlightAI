@@ -33,4 +33,9 @@ public class WorkloadConfiguration
     /// Default is true.
     /// </summary>
     public bool RevertOnBuildFailure { get; set; } = true;
+
+    /// <summary>
+    /// Configuration specific to Code Documentation workloads.
+    /// </summary>
+    public CodeDocWorkloadConfiguration CodeDocumentation { get; set; } = new();
 }

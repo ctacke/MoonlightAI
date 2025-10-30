@@ -7,7 +7,8 @@
       "Bash(dotnet build:*)",
       "Bash(docker ps:*)",
       "Read(//mnt/r/ollama-models/**)",
-      "Bash(dotnet add:*)"
+      "Bash(dotnet add:*)",
+      "Bash(sqlite3:*)"
     ],
     "deny": [],
     "ask": []

@@ -30,7 +30,12 @@
     "BatchSize": 10,
     "ValidateBuilds": true,
     "MaxBuildRetries": 2,
-    "RevertOnBuildFailure": true
+    "RevertOnBuildFailure": true,
+    "CodeDocumentation": {
+      "SolutionPath": "src/SolutionEngine.slnx",
+      "ProjectPath": "src/Engine/Modules/MQTT/SolutionEngine.MQTT.Module/SolutionEngine.MQTT.Module.csproj",
+      "DocumentVisibility": "Public"
+    }
   },
   "Database": {
     "DatabasePath": "F:\\repos\\ctacke\\MoonlightAI\\moonlight.db",

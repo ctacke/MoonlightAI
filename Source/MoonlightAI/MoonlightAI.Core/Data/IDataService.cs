@@ -87,6 +87,7 @@ public class ModelStatistics
     public long TotalPromptTokens { get; set; }
     public long TotalResponseTokens { get; set; }
     public double AverageTokensPerFile { get; set; }
+    public int TotalItemsDocumented { get; set; }
     public int TotalSanitizationFixes { get; set; }
-    public double AverageSanitizationFixesPerFile { get; set; }
+    public double AverageSanitizationFixesPerItem { get; set; }
 }

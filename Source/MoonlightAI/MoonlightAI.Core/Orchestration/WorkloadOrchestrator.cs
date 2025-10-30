@@ -204,6 +204,8 @@ public class WorkloadOrchestrator
     /// <summary>
     /// Executes code documentation workload by discovering files and creating individual workloads per file.
     /// All workloads are executed serially on a single git branch.
+    /// Uses configuration from WorkloadConfiguration.CodeDocumentation for solution and project paths.
+    /// Parameters can override configuration if provided.
     /// </summary>
     public async Task<BatchWorkloadResult> ExecuteCodeDocumentationAsync(
         string repositoryUrl,
@@ -215,7 +217,13 @@ public class WorkloadOrchestrator
         var results = new List<WorkloadResult>();
         var batchResult = new BatchWorkloadResult { WorkloadResults = results };
 
+        // Use configuration values if parameters not provided
+        var effectiveProjectPath = projectPath ?? _workloadConfig.CodeDocumentation.ProjectPath;
+        var effectiveSolutionPath = solutionPath ?? _workloadConfig.CodeDocumentation.SolutionPath;
+
         _logger.LogInformation("Starting code documentation for repository {RepositoryUrl}", repositoryUrl);
+        _logger.LogInformation("Using project path: {ProjectPath}", effectiveProjectPath);
+        _logger.LogInformation("Using solution path: {SolutionPath}", effectiveSolutionPath);
 
         // Variables for database tracking and workload execution
         WorkloadRunRecord? runRecord = null;
@@ -312,7 +320,7 @@ public class WorkloadOrchestrator
                 repositoryPath,
                 repoConfig,
                 "codedoc",
-                projectPath,
+                effectiveProjectPath,
                 cancellationToken);
 
             if (!allFilesToDocument.Any())
@@ -323,10 +331,10 @@ public class WorkloadOrchestrator
                 return batchResult;
             }
 
-            // Step 2.5: Apply batch size limit
-            filesToDocument = allFilesToDocument.Take(_workloadConfig.BatchSize).ToList();
-            _logger.LogInformation("Selected {SelectedCount} files from {TotalCount} available files (batch size: {BatchSize})",
-                filesToDocument.Count, allFilesToDocument.Count, _workloadConfig.BatchSize);
+            // Step 2.5: Process files until we reach batch size of MODIFIED files
+            // We'll process more files than the batch size if needed to account for files that don't need changes
+            _logger.LogInformation("Target: {BatchSize} modified files from {TotalCount} available files",
+                _workloadConfig.BatchSize, allFilesToDocument.Count);
 
             // Step 3: Create single branch for all workloads with timestamp for uniqueness
             var timestamp = DateTime.UtcNow.ToString("yyyy-MM-dd-HHmmss");
@@ -338,28 +346,34 @@ public class WorkloadOrchestrator
             var allModifiedFiles = new List<string>();
             var successfulWorkloads = 0;
 
-            // Step 4: Execute workloads serially (one at a time) for each file
-            _logger.LogInformation("Step 4: Processing {Count} files serially...", filesToDocument.Count);
+            // Step 4: Execute workloads serially until we reach batch size of modified files
+            _logger.LogInformation("Step 4: Processing files serially until {BatchSize} files are modified...", _workloadConfig.BatchSize);
 
             // Report initial batch size to progress callback (using -1 to indicate batch total)
-            progress?.Report(-filesToDocument.Count);
+            progress?.Report(-_workloadConfig.BatchSize);
 
-            foreach (var filePath in filesToDocument)
+            int fileIndex = 0;
+            while (fileIndex < allFilesToDocument.Count &&
+                   results.Count(r => r.IsSuccess && r.ModifiedFiles.Any()) < _workloadConfig.BatchSize)
             {
+                var filePath = allFilesToDocument[fileIndex];
+                fileIndex++;
+
                 // Create workload for this file
                 var workload = new CodeDocWorkload
                 {
                     RepositoryUrl = repositoryUrl,
-                    ProjectPath = projectPath ?? string.Empty,
-                    SolutionPath = solutionPath ?? string.Empty,
+                    ProjectPath = effectiveProjectPath,
+                    SolutionPath = effectiveSolutionPath,
                     FilePath = filePath,
-                    DocumentVisibility = MemberVisibility.Public | MemberVisibility.Internal
+                    DocumentVisibility = ParseDocumentVisibility(_workloadConfig.CodeDocumentation.DocumentVisibility)
                 };
 
                 try
                 {
-                    _logger.LogInformation("Processing file {FilePath} ({Current}/{Total})",
-                        filePath, successfulWorkloads + results.Count + 1, filesToDocument.Count);
+                    var currentModifiedCount = results.Count(r => r.IsSuccess && r.ModifiedFiles.Any());
+                    _logger.LogInformation("Processing file {FilePath} (evaluated: {Evaluated}, modified: {Modified}/{Target})",
+                        filePath, fileIndex, currentModifiedCount, _workloadConfig.BatchSize);
 
                     // Execute workload (serial execution - one at a time)
                     var result = await _codeDocRunner.ExecuteAsync(workload, repositoryPath, cancellationToken);
@@ -372,8 +386,34 @@ public class WorkloadOrchestrator
                         successfulWorkloads++;
                     }
 
-                    // Report progress after each file completes
-                    progress?.Report(results.Count);
+                    // Update database after each file completes to prevent data loss
+                    // Only count files that were actually modified
+                    if (runRecord != null && dataService != null)
+                    {
+                        try
+                        {
+                            runRecord.FilesSuccessful = results.Count(r => r.IsSuccess && r.ModifiedFiles.Any());
+                            runRecord.FilesFailed = results.Count(r => !r.IsSuccess);
+                            runRecord.FilesSkipped = results.Count(r => r.IsSuccess && !r.ModifiedFiles.Any());
+                            runRecord.TotalBuildFailures = results.Sum(r => r.Statistics?.BuildFailures ?? 0);
+                            runRecord.TotalBuildRetries = results.Sum(r => r.Statistics?.BuildRetries ?? 0);
+                            runRecord.TotalPromptTokens = results.Sum(r => r.Statistics?.TotalPromptTokens ?? 0);
+                            runRecord.TotalResponseTokens = results.Sum(r => r.Statistics?.TotalResponseTokens ?? 0);
+                            runRecord.TotalItemsDocumented = results.Sum(r => r.Statistics?.ItemsModified ?? 0);
+                            runRecord.TotalSanitizationFixes = results.Sum(r => r.Statistics?.TotalSanitizationFixes ?? 0);
+
+                            await dataService.UpdateRunAsync(runRecord, cancellationToken);
+                            _logger.LogDebug("Updated database after evaluating {Evaluated} files", results.Count);
+                        }
+                        catch (Exception dbEx)
+                        {
+                            _logger.LogWarning(dbEx, "Failed to update database after file completion, will retry at end");
+                        }
+                    }
+
+                    // Report progress after each file completes (only count modified files)
+                    currentModifiedCount = results.Count(r => r.IsSuccess && r.ModifiedFiles.Any());
+                    progress?.Report(currentModifiedCount);
                 }
                 catch (Exception ex)
                 {
@@ -385,15 +425,40 @@ public class WorkloadOrchestrator
                         Summary = $"Workload execution failed: {ex.Message}"
                     });
 
-                    // Report progress even for failed files
-                    progress?.Report(results.Count);
+                    // Update database even for failed files
+                    if (runRecord != null && dataService != null)
+                    {
+                        try
+                        {
+                            runRecord.FilesSuccessful = results.Count(r => r.IsSuccess && r.ModifiedFiles.Any());
+                            runRecord.FilesFailed = results.Count(r => !r.IsSuccess);
+                            runRecord.FilesSkipped = results.Count(r => r.IsSuccess && !r.ModifiedFiles.Any());
+                            runRecord.TotalBuildFailures = results.Sum(r => r.Statistics?.BuildFailures ?? 0);
+                            runRecord.TotalBuildRetries = results.Sum(r => r.Statistics?.BuildRetries ?? 0);
+                            runRecord.TotalPromptTokens = results.Sum(r => r.Statistics?.TotalPromptTokens ?? 0);
+                            runRecord.TotalResponseTokens = results.Sum(r => r.Statistics?.TotalResponseTokens ?? 0);
+                            runRecord.TotalItemsDocumented = results.Sum(r => r.Statistics?.ItemsModified ?? 0);
+                            runRecord.TotalSanitizationFixes = results.Sum(r => r.Statistics?.TotalSanitizationFixes ?? 0);
+
+                            await dataService.UpdateRunAsync(runRecord, cancellationToken);
+                        }
+                        catch (Exception dbEx)
+                        {
+                            _logger.LogWarning(dbEx, "Failed to update database after file failure");
+                        }
+                    }
+
+                    // Report progress (only count modified files)
+                    var modifiedCount = results.Count(r => r.IsSuccess && r.ModifiedFiles.Any());
+                    progress?.Report(modifiedCount);
                 }
 
                 // Check for cancellation after each file completes
                 if (cancellationToken.IsCancellationRequested)
                 {
-                    _logger.LogWarning("Workload cancellation requested. Processed {Count} of {Total} files. Saving completed work...",
-                        results.Count, filesToDocument.Count);
+                    var modifiedCount = results.Count(r => r.IsSuccess && r.ModifiedFiles.Any());
+                    _logger.LogWarning("Workload cancellation requested. Evaluated {Evaluated} files, modified {Modified}/{Target}. Saving completed work...",
+                        results.Count, modifiedCount, _workloadConfig.BatchSize);
                     break;
                 }
             }
@@ -414,23 +479,38 @@ public class WorkloadOrchestrator
                 await _gitManager.PushBranchAsync(repositoryPath, branchName, cancellationToken);
 
                 _logger.LogInformation("Step 7: Creating pull request...");
-                var prTitle = $"[MoonlightAI] Add XML Documentation - {DateTime.UtcNow:yyyy-MM-dd}";
-                var prBody = $"Automated XML documentation added by MoonlightAI\n\n" +
-                            $"**Files documented:** {successfulWorkloads}/{filesToDocument.Count}\n" +
-                            $"**Total changes:** {allModifiedFiles.Distinct().Count()} file(s)\n";
+                try
+                {
+                    var totalItemsDocumented = results.Sum(r => r.Statistics?.ItemsModified ?? 0);
+                    var filesEvaluated = results.Count;
+                    var prTitle = $"[MoonlightAI] Add XML Documentation - {DateTime.UtcNow:yyyy-MM-dd}";
+                    var prBody = $"Automated XML documentation added by MoonlightAI\n\n" +
+                                $"**Files documented:** {successfulWorkloads} (evaluated {filesEvaluated} files)\n" +
+                                $"**Items documented:** {totalItemsDocumented} (methods, properties, fields, classes)\n" +
+                                $"**Total changes:** {allModifiedFiles.Distinct().Count()} file(s)\n";
 
-                var prUrl = await _gitManager.CreatePullRequestAsync(repoConfig, branchName, prTitle, prBody, cancellationToken);
-                batchResult.PullRequestUrl = prUrl;
+                    var prUrl = await _gitManager.CreatePullRequestAsync(repoConfig, branchName, prTitle, prBody, cancellationToken);
+                    batchResult.PullRequestUrl = prUrl;
 
-                _logger.LogInformation("Code documentation completed successfully. PR: {PrUrl}", prUrl);
+                    _logger.LogInformation("Code documentation completed successfully. PR: {PrUrl}", prUrl);
+                }
+                catch (Exception prEx)
+                {
+                    _logger.LogError(prEx, "Failed to create pull request. Branch {BranchName} was pushed successfully but PR creation failed", branchName);
+                    batchResult.Success = false;
+                    batchResult.Summary += $" (PR creation failed: {prEx.Message})";
+                }
             }
             else
             {
                 _logger.LogInformation("No files were modified, skipping commit and PR");
             }
 
-            batchResult.Success = results.Any(r => r.IsSuccess);
-            batchResult.Summary = $"Completed {results.Count(r => r.IsSuccess)}/{results.Count} workloads";
+            batchResult.Success = results.Any(r => r.IsSuccess && r.ModifiedFiles.Any());
+            var filesModified = results.Count(r => r.IsSuccess && r.ModifiedFiles.Any());
+            var filesNoChange = results.Count(r => r.IsSuccess && !r.ModifiedFiles.Any());
+            var filesFailed = results.Count(r => !r.IsSuccess);
+            batchResult.Summary = $"Modified {filesModified} file(s), {filesNoChange} already complete, {filesFailed} failed (evaluated {results.Count} files)";
 
             // Update database tracking with final results
             if (runRecord != null && dataService != null)
@@ -440,17 +520,23 @@ public class WorkloadOrchestrator
                     runRecord.EndTime = DateTime.UtcNow;
                     runRecord.Success = batchResult.Success;
                     runRecord.TotalFilesDiscovered = allFilesToDocument.Count;
-                    runRecord.FilesSelected = filesToDocument.Count;
-                    runRecord.FilesSuccessful = results.Count(r => r.IsSuccess);
-                    runRecord.FilesFailed = results.Count(r => !r.IsSuccess);
-                    runRecord.FilesSkipped = allFilesToDocument.Count - filesToDocument.Count;
+                    runRecord.FilesSelected = results.Count;  // Files actually evaluated
+                    runRecord.FilesSuccessful = filesModified;  // Only count files that were actually modified
+                    runRecord.FilesFailed = filesFailed;
+                    runRecord.FilesSkipped = allFilesToDocument.Count - results.Count + filesNoChange;  // Files not evaluated + files already complete
                     runRecord.TotalBuildFailures = results.Sum(r => r.Statistics?.BuildFailures ?? 0);
                     runRecord.TotalBuildRetries = results.Sum(r => r.Statistics?.BuildRetries ?? 0);
                     runRecord.TotalPromptTokens = results.Sum(r => r.Statistics?.TotalPromptTokens ?? 0);
                     runRecord.TotalResponseTokens = results.Sum(r => r.Statistics?.TotalResponseTokens ?? 0);
+                    runRecord.TotalItemsDocumented = results.Sum(r => r.Statistics?.ItemsModified ?? 0);
                     runRecord.TotalSanitizationFixes = results.Sum(r => r.Statistics?.TotalSanitizationFixes ?? 0);
                     runRecord.PullRequestUrl = batchResult.PullRequestUrl;
                     runRecord.BranchName = branchName;
+
+                    // Diagnostic logging for statistics
+                    _logger.LogInformation("Database update stats: Sanitization={Sanit}, PromptTokens={Prompt}, ResponseTokens={Response}, BuildFailures={BuildFail}, BuildRetries={BuildRetry}",
+                        runRecord.TotalSanitizationFixes, runRecord.TotalPromptTokens, runRecord.TotalResponseTokens,
+                        runRecord.TotalBuildFailures, runRecord.TotalBuildRetries);
 
                     await dataService.UpdateRunAsync(runRecord, cancellationToken);
                     _logger.LogInformation("Updated database tracking for run {RunId}", runRecord.RunId);
@@ -740,6 +826,35 @@ public class WorkloadOrchestrator
                 ErrorMessage = errorMessage
             };
         }
+    }
+
+    /// <summary>
+    /// Parses the DocumentVisibility configuration string into MemberVisibility flags.
+    /// </summary>
+    private MemberVisibility ParseDocumentVisibility(string visibilityConfig)
+    {
+        if (string.IsNullOrWhiteSpace(visibilityConfig))
+        {
+            return MemberVisibility.Public;
+        }
+
+        var visibility = MemberVisibility.None;
+        var parts = visibilityConfig.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        foreach (var part in parts)
+        {
+            if (Enum.TryParse<MemberVisibility>(part, ignoreCase: true, out var parsed))
+            {
+                visibility |= parsed;
+            }
+            else
+            {
+                _logger.LogWarning("Unknown visibility value in configuration: {Value}. Ignoring.", part);
+            }
+        }
+
+        // Default to Public if nothing was parsed
+        return visibility == MemberVisibility.None ? MemberVisibility.Public : visibility;
     }
 
     /// <summary>

@@ -169,9 +169,10 @@ public class SQLiteDataService : IDataService
                 AverageTokensPerFile = totalFilesProcessed > 0
                     ? (double)modelRuns.Sum(r => r.TotalPromptTokens + r.TotalResponseTokens) / totalFilesProcessed
                     : 0,
+                TotalItemsDocumented = modelRuns.Sum(r => r.TotalItemsDocumented),
                 TotalSanitizationFixes = modelRuns.Sum(r => r.TotalSanitizationFixes),
-                AverageSanitizationFixesPerFile = totalFilesProcessed > 0
-                    ? (double)modelRuns.Sum(r => r.TotalSanitizationFixes) / totalFilesProcessed
+                AverageSanitizationFixesPerItem = modelRuns.Sum(r => r.TotalItemsDocumented) > 0
+                    ? (double)modelRuns.Sum(r => r.TotalSanitizationFixes) / modelRuns.Sum(r => r.TotalItemsDocumented)
                     : 0
             };
         }

@@ -218,26 +218,54 @@ public class WorkloadScheduler : IWorkloadScheduler
                 return false;
             }
 
-            // Check if there are any public members without documentation
-            var needsDocumentation = publicClasses.Any(c =>
-                // Class itself needs documentation
-                c.XmlDocumentation == null ||
-                // Public methods need documentation
-                c.Methods.Any(m => m.Accessibility == "public" && m.XmlDocumentation == null) ||
-                // Public properties need documentation
-                c.Properties.Any(p => p.Accessibility == "public" && p.XmlDocumentation == null) ||
-                // Public const/readonly fields need documentation
-                c.Fields.Any(f => f.Accessibility == "public" && (f.IsConst || f.IsReadOnly) && f.XmlDocumentation == null));
+            // Count total documentable items and undocumented items
+            int totalDocumentableItems = 0;
+            int undocumentedItems = 0;
 
-            if (!needsDocumentation)
+            foreach (var c in publicClasses)
             {
-                _logger.LogDebug("File already fully documented: {FilePath} ({ClassCount} public classes)",
-                    filePath, publicClasses.Count);
+                // Count class itself
+                totalDocumentableItems++;
+                if (c.XmlDocumentation == null)
+                    undocumentedItems++;
+
+                // Count public methods
+                var publicMethods = c.Methods.Where(m => m.Accessibility == "public").ToList();
+                totalDocumentableItems += publicMethods.Count;
+                undocumentedItems += publicMethods.Count(m => m.XmlDocumentation == null);
+
+                // Count public properties
+                var publicProperties = c.Properties.Where(p => p.Accessibility == "public").ToList();
+                totalDocumentableItems += publicProperties.Count;
+                undocumentedItems += publicProperties.Count(p => p.XmlDocumentation == null);
+
+                // Count public const/readonly fields
+                var publicFields = c.Fields.Where(f => f.Accessibility == "public" && (f.IsConst || f.IsReadOnly)).ToList();
+                totalDocumentableItems += publicFields.Count;
+                undocumentedItems += publicFields.Count(f => f.XmlDocumentation == null);
+            }
+
+            // Only select files that have a significant amount of undocumented items (more than 50%)
+            // This helps avoid reprocessing files that were mostly documented in a previous run
+            if (undocumentedItems == 0)
+            {
+                _logger.LogDebug("File already fully documented: {FilePath} (0/{Total} undocumented)",
+                    filePath, totalDocumentableItems);
                 return false;
             }
 
-            _logger.LogDebug("File needs documentation: {FilePath} ({ClassCount} public classes with missing docs)",
-                filePath, publicClasses.Count);
+            double undocumentedPercent = (double)undocumentedItems / totalDocumentableItems * 100;
+
+            // Skip files that have less than 50% undocumented (likely partially processed)
+            if (undocumentedPercent < 50)
+            {
+                _logger.LogDebug("File mostly documented, skipping: {FilePath} ({Undoc}/{Total} undocumented = {Percent:F1}%)",
+                    filePath, undocumentedItems, totalDocumentableItems, undocumentedPercent);
+                return false;
+            }
+
+            _logger.LogDebug("File needs documentation: {FilePath} ({Undoc}/{Total} undocumented = {Percent:F1}%)",
+                filePath, undocumentedItems, totalDocumentableItems, undocumentedPercent);
             return true;
         }
         catch (Exception ex)

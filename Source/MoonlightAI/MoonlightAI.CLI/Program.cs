@@ -56,6 +56,9 @@ services.AddLogging(builder =>
 {
     builder.AddProvider(new TerminalUILoggerProvider(ui, LogLevel.Information));
     builder.SetMinimumLevel(LogLevel.Information);
+
+    // Suppress Entity Framework SQL command logging
+    builder.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogLevel.Warning);
 });
 
 // Register configurations
@@ -86,6 +89,11 @@ services.AddDbContext<MoonlightDbContext>(options =>
     {
         options.EnableSensitiveDataLogging();
         options.EnableDetailedErrors();
+    }
+    else
+    {
+        // Suppress SQL command logging
+        options.ConfigureWarnings(warnings => warnings.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.CommandExecuted));
     }
 });
 services.AddScoped<IDataService, SQLiteDataService>();
@@ -135,7 +143,7 @@ catch (Exception ex)
 // Handle commands from UI
 ui.CommandEntered += async (sender, command) =>
 {
-    await HandleCommandAsync(command, ui, serviceProvider, cancellationHolder);
+    await HandleCommandAsync(command, ui, serviceProvider, repoConfig, cancellationHolder);
 };
 
 // Show welcome message
@@ -160,7 +168,7 @@ ui.Run();
 return 0;
 
 // Command handler
-static async Task HandleCommandAsync(string command, MoonlightTerminalUI ui, ServiceProvider serviceProvider, WorkloadCancellationHolder cancellationHolder)
+static async Task HandleCommandAsync(string command, MoonlightTerminalUI ui, ServiceProvider serviceProvider, RepositoryConfigurations repoConfig, WorkloadCancellationHolder cancellationHolder)
 {
     var cmd = command.Trim().ToLowerInvariant();
 
@@ -175,7 +183,7 @@ static async Task HandleCommandAsync(string command, MoonlightTerminalUI ui, Ser
                     break;
                 }
                 cancellationHolder.CancellationTokenSource = new CancellationTokenSource();
-                await ExecuteWorkloadAsync(ui, serviceProvider, cancellationHolder.CancellationTokenSource.Token);
+                await ExecuteWorkloadAsync(ui, serviceProvider, repoConfig, cancellationHolder.CancellationTokenSource.Token);
                 cancellationHolder.CancellationTokenSource?.Dispose();
                 cancellationHolder.CancellationTokenSource = null;
                 break;
@@ -238,7 +246,7 @@ static async Task HandleCommandAsync(string command, MoonlightTerminalUI ui, Ser
     }
 }
 
-static async Task ExecuteWorkloadAsync(MoonlightTerminalUI ui, ServiceProvider serviceProvider, CancellationToken cancellationToken)
+static async Task ExecuteWorkloadAsync(MoonlightTerminalUI ui, ServiceProvider serviceProvider, RepositoryConfigurations repoConfig, CancellationToken cancellationToken)
 {
     ui.SetStatus("Running workload... (type 'stop' to cancel)");
     ui.AppendLog("Starting code documentation workload...");
@@ -259,7 +267,7 @@ static async Task ExecuteWorkloadAsync(MoonlightTerminalUI ui, ServiceProvider s
     // Track progress during execution
     int filesProcessedThisRun = 0;
     int batchTotal = 0;
-    var progressCallback = new Progress<int>(value =>
+    var progressCallback = new Progress<int>(async value =>
     {
         // Negative value indicates batch total (sent at start)
         if (value < 0)
@@ -273,16 +281,46 @@ static async Task ExecuteWorkloadAsync(MoonlightTerminalUI ui, ServiceProvider s
             filesProcessedThisRun = value;
             ui.UpdateStatistics(initialRunCount + 1, initialFileCount + filesProcessedThisRun);
             ui.UpdateBatchProgress(filesProcessedThisRun, batchTotal);
+
+            // Refresh model statistics from database after each file
+            using (var scope = serviceProvider.CreateScope())
+            {
+                try
+                {
+                    var dataService = scope.ServiceProvider.GetRequiredService<IDataService>();
+                    var modelComparison = await dataService.GetModelComparisonAsync();
+                    var aiConfig = serviceProvider.GetRequiredService<AIServerConfiguration>();
+                    if (modelComparison.TryGetValue(aiConfig.ModelName, out var modelStats))
+                    {
+                        ui.UpdateModelStatistics(modelStats);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Don't let database errors stop progress updates
+                    ui.AppendLog($"Warning: Failed to refresh model statistics: {ex.Message}");
+                }
+            }
         }
     });
 
     try
     {
+        // Get repository URL from configuration
+        var repositoryUrl = repoConfig.Repositories.FirstOrDefault()?.RepositoryUrl;
+        if (string.IsNullOrEmpty(repositoryUrl))
+        {
+            ui.AppendLog("ERROR: No repository configured in appsettings.json");
+            ui.SetStatus("Idle");
+            return;
+        }
+
         // Execute code documentation for the repository with progress updates
+        // Project and solution paths come from workload configuration
         var result = await orchestrator.ExecuteCodeDocumentationAsync(
-            repositoryUrl: "https://github.com/LECS-Energy-LLC/solution-family",
-            projectPath: @"src\Engine\Modules\MQTT\SolutionEngine.MQTT.Module\SolutionEngine.MQTT.Module.csproj",
-            solutionPath: @"src\SolutionEngine.slnx",
+            repositoryUrl: repositoryUrl,
+            projectPath: null,  // Uses configuration value
+            solutionPath: null, // Uses configuration value
             progress: progressCallback,
             cancellationToken: cancellationToken);
 
@@ -364,13 +402,13 @@ static async Task DisplayComparisonReportAsync(MoonlightTerminalUI ui, ServicePr
                       $"{model.SuccessRate,7:F1}% " +
                       $"{model.TotalFilesProcessed,7} " +
                       $"{model.TotalBuildFailures,9} " +
-                      $"{model.AverageSanitizationFixesPerFile,9:F2}";
+                      $"{model.AverageSanitizationFixesPerItem,9:F2}";
 
             ui.AppendLog(line);
         }
 
         ui.AppendLog("");
-        ui.AppendLog("Legend: SanitFix = Avg sanitization fixes per file (hallucinations)");
+        ui.AppendLog("Legend: SanitFix = Avg sanitization fixes per item (hallucinations)");
     }
 
     ui.AppendLog("═══════════════════════════════════════════════════════════════");

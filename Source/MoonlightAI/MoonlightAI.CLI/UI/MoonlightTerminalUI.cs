@@ -1,7 +1,7 @@
-using Terminal.Gui;
 using MoonlightAI.Core.Configuration;
 using MoonlightAI.Core.Data;
 using MoonlightAI.Core.Models;
+using Terminal.Gui;
 
 namespace MoonlightAI.CLI.UI;
 
@@ -233,7 +233,7 @@ Database: {dbPath}";
             rightLines.Add("");
             rightLines.Add("Model Performance:");
             rightLines.Add($"  Success: {_currentModelStats.SuccessRate:F1}%");
-            rightLines.Add($"  Sanit Fix: {_currentModelStats.AverageSanitizationFixesPerFile:F2}/file");
+            rightLines.Add($"  Sanit Fix: {_currentModelStats.AverageSanitizationFixesPerItem:F2}/item");
             rightLines.Add($"  Build Fail: {_currentModelStats.TotalBuildFailures}");
             rightLines.Add($"  Retries: {_currentModelStats.TotalBuildRetries}");
         }
