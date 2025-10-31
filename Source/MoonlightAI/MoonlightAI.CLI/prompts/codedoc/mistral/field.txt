@@ -1,0 +1,26 @@
+TASK: Generate C# XML documentation for a field
+
+FIELD TO DOCUMENT:
+{field}
+
+INSTRUCTIONS:
+- Generate ONLY lines starting with ///
+- Use <summary> tag only
+- Keep description concise (1-2 sentences)
+- Do not include the field declaration or any code
+- Wrap output in <doc></doc> tags
+
+RULES:
+• Every line must start with ///
+• Every opening tag needs a closing tag
+• No orphaned closing tags
+• Keep descriptions brief and accurate
+
+FORMAT EXAMPLE:
+<doc>
+/// <summary>
+/// Description of the field.
+/// </summary>
+</doc>
+
+OUTPUT:

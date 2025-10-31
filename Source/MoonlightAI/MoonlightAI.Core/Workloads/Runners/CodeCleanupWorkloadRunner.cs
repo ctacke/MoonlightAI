@@ -4,6 +4,7 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.Extensions.Logging;
 using MoonlightAI.Core.Build;
 using MoonlightAI.Core.Configuration;
+using MoonlightAI.Core.Prompts;
 using System.Text;
 
 namespace MoonlightAI.Core.Workloads.Runners;
@@ -18,19 +19,25 @@ public class CodeCleanupWorkloadRunner : IWorkloadRunner<CodeCleanupWorkload>
     private readonly IBuildValidator _buildValidator;
     private readonly IGitManager _gitManager;
     private readonly WorkloadConfiguration _workloadConfig;
+    private readonly PromptService _promptService;
+    private readonly AIServerConfiguration _aiServerConfig;
 
     public CodeCleanupWorkloadRunner(
         ILogger<CodeCleanupWorkloadRunner> logger,
         IAIServer aiServer,
         IBuildValidator buildValidator,
         IGitManager gitManager,
-        WorkloadConfiguration workloadConfig)
+        WorkloadConfiguration workloadConfig,
+        PromptService promptService,
+        AIServerConfiguration aiServerConfig)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _aiServer = aiServer ?? throw new ArgumentNullException(nameof(aiServer));
         _buildValidator = buildValidator ?? throw new ArgumentNullException(nameof(buildValidator));
         _gitManager = gitManager ?? throw new ArgumentNullException(nameof(gitManager));
         _workloadConfig = workloadConfig ?? throw new ArgumentNullException(nameof(workloadConfig));
+        _promptService = promptService ?? throw new ArgumentNullException(nameof(promptService));
+        _aiServerConfig = aiServerConfig ?? throw new ArgumentNullException(nameof(aiServerConfig));
     }
 
     /// <inheritdoc/>
@@ -490,69 +497,41 @@ public class CodeCleanupWorkloadRunner : IWorkloadRunner<CodeCleanupWorkload>
 
     private string GenerateCleanupPrompt(CleanupOpportunity opportunity, string fileContent)
     {
-        var prompt = new StringBuilder();
+        var variables = new Dictionary<string, string>
+        {
+            ["lineNumber"] = opportunity.LineNumber.ToString(),
+            ["fileContent"] = fileContent
+        };
 
-        prompt.AppendLine("You are a C# code cleanup assistant. Your task is to perform a specific refactoring operation.");
-        prompt.AppendLine();
-        prompt.AppendLine($"CLEANUP OPERATION: {opportunity.Type}");
-        prompt.AppendLine($"LINE NUMBER: {opportunity.LineNumber}");
-        prompt.AppendLine();
+        string operation;
 
         switch (opportunity.Type)
         {
             case CleanupType.UnusedUsing:
-                prompt.AppendLine($"Remove the unused using statement: {opportunity.Metadata["Namespace"]}");
-                prompt.AppendLine();
-                prompt.AppendLine("INSTRUCTIONS:");
-                prompt.AppendLine("1. Remove only the specified using statement");
-                prompt.AppendLine("2. Preserve all other using statements");
-                prompt.AppendLine("3. Preserve all code");
+                operation = "unused-using";
+                variables["namespace"] = opportunity.Metadata["Namespace"];
                 break;
 
             case CleanupType.PublicFieldToProperty:
+                operation = "field-to-property";
                 var fieldName = opportunity.Metadata["FieldName"];
-                var propertyName = ToPascalCase(fieldName);
-                prompt.AppendLine($"Convert the public field '{fieldName}' to a PascalCase property '{propertyName}'.");
-                prompt.AppendLine();
-                prompt.AppendLine("INSTRUCTIONS:");
-                prompt.AppendLine($"1. Replace the field declaration with: public {opportunity.Metadata["FieldType"]} {propertyName} {{ get; set; }}");
-                prompt.AppendLine($"2. The property MUST be named '{propertyName}' (PascalCase)");
-                prompt.AppendLine($"3. Update all references to '{fieldName}' to use '{propertyName}'");
-                prompt.AppendLine("4. Preserve all other code");
+                variables["fieldName"] = fieldName;
+                variables["propertyName"] = ToPascalCase(fieldName);
+                variables["fieldType"] = opportunity.Metadata["FieldType"];
                 break;
 
             case CleanupType.ReorderPrivateFields:
-                prompt.AppendLine($"Reorder private fields in class '{opportunity.Metadata["ClassName"]}' to the top of the class.");
-                prompt.AppendLine();
-                prompt.AppendLine("INSTRUCTIONS:");
-                prompt.AppendLine("1. Move all private fields to the top of the class (after class declaration)");
-                prompt.AppendLine("2. Keep private fields in their current order relative to each other");
-                prompt.AppendLine("3. Private fields should come before properties, constructors, and methods");
-                prompt.AppendLine("4. Preserve all other code and formatting");
+                operation = "reorder-fields";
+                variables["className"] = opportunity.Metadata["ClassName"];
                 break;
 
             default:
-                prompt.AppendLine("INSTRUCTIONS:");
-                prompt.AppendLine("1. Perform the requested cleanup operation");
-                prompt.AppendLine("2. Make minimal changes");
-                prompt.AppendLine("3. Preserve all functionality");
+                // For unknown cleanup types, generate a generic prompt
+                operation = "default";
                 break;
         }
 
-        prompt.AppendLine();
-        prompt.AppendLine("CURRENT FILE CONTENT:");
-        prompt.AppendLine("```csharp");
-        prompt.AppendLine(fileContent);
-        prompt.AppendLine("```");
-        prompt.AppendLine();
-        prompt.AppendLine("GENERAL INSTRUCTIONS:");
-        prompt.AppendLine("1. Return the COMPLETE modified file");
-        prompt.AppendLine("2. Do NOT add comments or explanations");
-        prompt.AppendLine("3. Do NOT include markdown code block markers in your response");
-        prompt.AppendLine("4. The response should be valid C# code that can be directly written to the file");
-        prompt.AppendLine("5. Preserve all formatting, comments, and structure except for the specific cleanup");
-
-        return prompt.ToString();
+        return _promptService.GetPrompt("cleanup", operation, _aiServerConfig.ModelName, variables);
     }
 
     private string ToPascalCase(string fieldName)

@@ -1,0 +1,17 @@
+Generate XML documentation comment for the following C# property:
+
+{property}
+
+Requirements:
+- Output ONLY the XML documentation lines (starting with "///")
+- Use <summary> tag only
+- Keep description concise (1-2 sentences)
+- The first line MUST be: /// <summary>
+- Do NOT include the property declaration itself
+
+Example:
+/// <summary>
+/// Description of the property.
+/// </summary>
+
+OUTPUT:

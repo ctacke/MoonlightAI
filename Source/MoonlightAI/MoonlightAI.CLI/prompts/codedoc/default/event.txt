@@ -1,0 +1,18 @@
+Generate XML documentation comment for the following C# event:
+
+{event}
+
+Requirements:
+- Output ONLY the XML documentation lines (starting with "///")
+- Use <summary> tag only
+- Describe when the event is raised
+- Keep description concise (1-2 sentences)
+- The first line MUST be: /// <summary>
+- Do NOT include the event declaration itself
+
+Example:
+/// <summary>
+/// Raised when something happens.
+/// </summary>
+
+OUTPUT:

@@ -1,0 +1,24 @@
+You are a C# XML documentation generator. Your task is to generate ONLY the XML documentation comments for the event below.
+
+C# Event to document:
+```csharp
+{event}
+```
+
+CRITICAL REQUIREMENTS:
+1. Output ONLY the XML documentation comment lines (starting with "///")
+2. DO NOT include the event code itself
+3. Use <summary> tag only (no <returns> or <param> tags)
+4. Describe when the event is raised
+5. Keep descriptions concise (1-2 sentences)
+6. DO NOT explain, describe, or add any extra text
+7. Your entire output must be wrapped in <doc></doc> markers
+
+EXAMPLE FORMAT:
+<doc>
+/// <summary>
+/// Raised when something happens.
+/// </summary>
+</doc>
+
+OUTPUT (XML documentation comments ONLY, wrapped in <doc></doc>):

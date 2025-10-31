@@ -1,0 +1,22 @@
+Generate XML documentation comments for this C# field. Follow the instructions carefully.
+
+Field:
+```csharp
+{field}
+```
+
+Requirements:
+• Output only the XML doc comment lines (starting with ///)
+• Use <summary> tag only
+• Keep description concise (1-2 sentences)
+• Do NOT include the field declaration itself
+• Wrap your output in <doc></doc> tags
+
+Example:
+<doc>
+/// <summary>
+/// Description of the field.
+/// </summary>
+</doc>
+
+Generate documentation:

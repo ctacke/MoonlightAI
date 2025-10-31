@@ -1,0 +1,23 @@
+Generate XML documentation comments for this C# event. Follow the instructions carefully.
+
+Event:
+```csharp
+{event}
+```
+
+Requirements:
+• Output only the XML doc comment lines (starting with ///)
+• Use <summary> tag only
+• Describe when the event is raised
+• Keep description concise (1-2 sentences)
+• Do NOT include the event declaration itself
+• Wrap your output in <doc></doc> tags
+
+Example:
+<doc>
+/// <summary>
+/// Raised when something happens.
+/// </summary>
+</doc>
+
+Generate documentation:

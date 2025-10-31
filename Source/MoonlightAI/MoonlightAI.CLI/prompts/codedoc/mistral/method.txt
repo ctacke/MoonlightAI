@@ -1,0 +1,38 @@
+TASK: Generate C# XML documentation comments
+
+METHOD TO DOCUMENT:
+{method}
+
+INSTRUCTIONS:
+- Generate ONLY lines starting with ///
+- Use these XML tags: <summary>, <param>, <returns>, <remarks>
+- For void methods or methods returning Task: omit <returns> tag
+- Verify all parameter names match the method signature exactly
+- Do not include method code or any explanations
+- Wrap output in <doc></doc> tags
+
+RULES:
+• Every line must start with ///
+• Every opening tag needs a closing tag
+• No orphaned closing tags
+• No hallucinated parameters
+• Keep descriptions brief and accurate
+
+FORMAT EXAMPLE (method with return value):
+<doc>
+/// <summary>
+/// Description of method purpose.
+/// </summary>
+/// <param name="paramName">Parameter description.</param>
+/// <returns>Return value description.</returns>
+</doc>
+
+FORMAT EXAMPLE (void/Task method):
+<doc>
+/// <summary>
+/// Description of method purpose.
+/// </summary>
+/// <param name="paramName">Parameter description.</param>
+</doc>
+
+OUTPUT:

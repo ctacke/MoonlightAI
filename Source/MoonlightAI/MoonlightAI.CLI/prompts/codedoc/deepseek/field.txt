@@ -1,0 +1,20 @@
+Task: Generate C# XML documentation for a field
+
+Input field:
+```csharp
+{field}
+```
+
+Instructions:
+1. Analyze the field declaration
+2. Generate only /// comment lines
+3. Use <summary> tag only
+4. Keep description precise and technical
+5. Wrap output in <doc></doc>
+
+Output format:
+<doc>
+/// <summary>Brief description.</summary>
+</doc>
+
+Generate:

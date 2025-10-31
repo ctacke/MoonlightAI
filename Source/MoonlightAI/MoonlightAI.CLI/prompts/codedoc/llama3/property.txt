@@ -1,0 +1,22 @@
+Generate XML documentation comments for this C# property. Follow the instructions carefully.
+
+Property:
+```csharp
+{property}
+```
+
+Requirements:
+• Output only the XML doc comment lines (starting with ///)
+• Use <summary> tag only
+• Keep description concise (1-2 sentences)
+• Do NOT include the property declaration itself
+• Wrap your output in <doc></doc> tags
+
+Example:
+<doc>
+/// <summary>
+/// Gets or sets the description of the property.
+/// </summary>
+</doc>
+
+Generate documentation:

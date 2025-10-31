@@ -1,0 +1,36 @@
+Task: Generate C# XML documentation
+
+Input method:
+```csharp
+{method}
+```
+
+Instructions:
+1. Analyze the method signature carefully
+2. Generate only /// comment lines
+3. Use standard XML doc tags: <summary>, <param>, <returns>
+4. For void/Task methods: skip <returns> tag
+5. Match parameter names exactly
+6. Ensure balanced XML tags
+7. Keep descriptions precise and technical
+8. Wrap output in <doc></doc>
+
+Quality checks:
+- Return type void or Task? → No <returns> tag
+- All parameters documented? → Match signature
+- All tags closed? → Check balance
+
+Output format (with return):
+<doc>
+/// <summary>Brief description.</summary>
+/// <param name="name">Parameter purpose.</param>
+/// <returns>Return value description.</returns>
+</doc>
+
+Output format (void/Task):
+<doc>
+/// <summary>Brief description.</summary>
+/// <param name="name">Parameter purpose.</param>
+</doc>
+
+Generate:

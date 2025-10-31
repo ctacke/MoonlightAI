@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using MoonlightAI.Core.Build;
 using MoonlightAI.Core.Configuration;
+using MoonlightAI.Core.Prompts;
 using System.Text;
 
 namespace MoonlightAI.Core.Workloads.Runners;
@@ -16,6 +17,8 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
     private readonly IBuildValidator _buildValidator;
     private readonly IGitManager _gitManager;
     private readonly WorkloadConfiguration _workloadConfig;
+    private readonly PromptService _promptService;
+    private readonly AIServerConfiguration _aiServerConfig;
 
     public CodeDocWorkloadRunner(
         ILogger<CodeDocWorkloadRunner> logger,
@@ -23,7 +26,9 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
         ICodeAnalyzer codeAnalyzer,
         IBuildValidator buildValidator,
         IGitManager gitManager,
-        WorkloadConfiguration workloadConfig)
+        WorkloadConfiguration workloadConfig,
+        PromptService promptService,
+        AIServerConfiguration aiServerConfig)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _aiServer = aiServer ?? throw new ArgumentNullException(nameof(aiServer));
@@ -31,6 +36,8 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
         _buildValidator = buildValidator ?? throw new ArgumentNullException(nameof(buildValidator));
         _gitManager = gitManager ?? throw new ArgumentNullException(nameof(gitManager));
         _workloadConfig = workloadConfig ?? throw new ArgumentNullException(nameof(workloadConfig));
+        _promptService = promptService ?? throw new ArgumentNullException(nameof(promptService));
+        _aiServerConfig = aiServerConfig ?? throw new ArgumentNullException(nameof(aiServerConfig));
     }
 
     /// <inheritdoc/>
@@ -524,27 +531,12 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
         // Extract field declaration (usually just one line)
         var fieldLine = originalContentLines[field.FirstLineNumber - 1];
 
-        // Generate a simple prompt for constant/field documentation
-        var prompt = $"""
-            Generate XML documentation comment for the following C# constant/field:
-
-            {fieldLine}
-
-            Output **only** the XML documentation comment block.
-
-            Rules:
-            1. Output must begin with "/// <summary>".
-            2. Every line must start with "///".
-            3. Use <summary> tag only (no <returns> or <param> tags).
-            4. Keep it concise (1-2 sentences).
-            5. Do NOT include the field declaration or any code.
-            6. Do NOT explain, describe, or add any extra text.
-            7. Your entire output must be between <doc> and </doc> markers.
-
-            <doc>
-            /// ...
-            </doc>
-            """;
+        // Generate prompt using PromptService
+        var variables = new Dictionary<string, string>
+        {
+            ["field"] = fieldLine
+        };
+        var prompt = _promptService.GetPrompt("codedoc", "field", _aiServerConfig.ModelName, variables);
 
         // Generate documentation
         var startTime = DateTime.UtcNow;
@@ -660,27 +652,12 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
         // Extract property declaration (usually just one line)
         var propertyLine = originalContentLines[property.FirstLineNumber - 1];
 
-        // Generate a simple prompt for property documentation
-        var prompt = $"""
-            Generate XML documentation comment for the following C# property:
-
-            {propertyLine}
-
-            Output **only** the XML documentation comment block.
-
-            Rules:
-            1. Output must begin with "/// <summary>".
-            2. Every line must start with "///".
-            3. Use <summary> tag only (no <returns>, <value>, or <param> tags).
-            4. Keep it concise (1-2 sentences).
-            5. Do NOT include the property declaration or any code.
-            6. Do NOT explain, describe, or add any extra text.
-            7. Your entire output must be between <doc> and </doc> markers.
-
-            <doc>
-            /// ...
-            </doc>
-            """;
+        // Generate prompt using PromptService
+        var variables = new Dictionary<string, string>
+        {
+            ["property"] = propertyLine
+        };
+        var prompt = _promptService.GetPrompt("codedoc", "property", _aiServerConfig.ModelName, variables);
 
         // Generate documentation
         var startTime = DateTime.UtcNow;
@@ -796,27 +773,12 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
         // Extract event declaration (usually just one line)
         var eventLine = originalContentLines[evt.FirstLineNumber - 1];
 
-        // Generate a simple prompt for event documentation
-        var prompt = $"""
-            Generate XML documentation comment for the following C# event:
-
-            {eventLine}
-
-            Output **only** the XML documentation comment block.
-
-            Rules:
-            1. Output must begin with "/// <summary>".
-            2. Every line must start with "///".
-            3. Use <summary> tag only (no <returns> or <param> tags).
-            4. Keep it concise (1-2 sentences).
-            5. Do NOT include the event declaration or any code.
-            6. Do NOT explain, describe, or add any extra text.
-            7. Your entire output must be between <doc> and </doc> markers.
-
-            <doc>
-            /// ...
-            </doc>
-            """;
+        // Generate prompt using PromptService
+        var variables = new Dictionary<string, string>
+        {
+            ["event"] = eventLine
+        };
+        var prompt = _promptService.GetPrompt("codedoc", "event", _aiServerConfig.ModelName, variables);
 
         // Generate documentation
         var startTime = DateTime.UtcNow;

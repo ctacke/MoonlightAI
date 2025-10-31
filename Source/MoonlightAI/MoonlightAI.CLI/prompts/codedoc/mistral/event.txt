@@ -1,0 +1,27 @@
+TASK: Generate C# XML documentation for an event
+
+EVENT TO DOCUMENT:
+{event}
+
+INSTRUCTIONS:
+- Generate ONLY lines starting with ///
+- Use <summary> tag only
+- Describe when the event is raised
+- Keep description concise (1-2 sentences)
+- Do not include the event declaration or any code
+- Wrap output in <doc></doc> tags
+
+RULES:
+• Every line must start with ///
+• Every opening tag needs a closing tag
+• No orphaned closing tags
+• Keep descriptions brief and accurate
+
+FORMAT EXAMPLE:
+<doc>
+/// <summary>
+/// Raised when something happens.
+/// </summary>
+</doc>
+
+OUTPUT:

@@ -1,0 +1,23 @@
+You are a C# XML documentation generator. Your task is to generate ONLY the XML documentation comments for the property below.
+
+C# Property to document:
+```csharp
+{property}
+```
+
+CRITICAL REQUIREMENTS:
+1. Output ONLY the XML documentation comment lines (starting with "///")
+2. DO NOT include the property code itself
+3. Use <summary> tag only (no <returns> or <param> tags)
+4. Keep descriptions concise (1-2 sentences)
+5. DO NOT explain, describe, or add any extra text
+6. Your entire output must be wrapped in <doc></doc> markers
+
+EXAMPLE FORMAT:
+<doc>
+/// <summary>
+/// Gets or sets the brief description of the property.
+/// </summary>
+</doc>
+
+OUTPUT (XML documentation comments ONLY, wrapped in <doc></doc>):

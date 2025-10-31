@@ -1,0 +1,43 @@
+You are a C# XML documentation generator. Your task is to generate ONLY the XML documentation comments for the method below.
+
+C# Method to document:
+```csharp
+{method}
+```
+
+CRITICAL REQUIREMENTS:
+1. Output ONLY the XML documentation comment lines (starting with "///")
+2. DO NOT include the method code itself
+3. DO NOT add XML tags that don't match the method signature
+4. ONLY use these valid XML tags: <summary>, <param>, <returns>, <remarks>, <exception>
+5. For void methods or methods returning Task (with no generic parameter), DO NOT include a <returns> tag
+6. ONLY document parameters that actually exist in the method signature
+7. DO NOT add closing tags without matching opening tags
+8. Keep descriptions concise, clear, and accurate
+9. DO NOT include <member> tags or any other wrapper tags
+10. Your entire output must be wrapped in <doc></doc> markers
+
+VALIDATION CHECKLIST:
+- Check the method's return type before adding <returns>
+- Verify each parameter name exists in the signature
+- Ensure every opening tag has a matching closing tag
+- Count parameters: only add <param> tags for actual parameters
+
+EXAMPLE FORMAT (for a method with parameters and return value):
+<doc>
+/// <summary>
+/// Brief description of what the method does.
+/// </summary>
+/// <param name="actualParamName">Description of the parameter.</param>
+/// <returns>Description of what the method returns.</returns>
+</doc>
+
+EXAMPLE FORMAT (for a void method or method returning Task):
+<doc>
+/// <summary>
+/// Brief description of what the method does.
+/// </summary>
+/// <param name="actualParamName">Description of the parameter.</param>
+</doc>
+
+OUTPUT (XML documentation comments ONLY, wrapped in <doc></doc>):

@@ -1,0 +1,17 @@
+Generate XML documentation comment for the following C# constant/field:
+
+{field}
+
+Requirements:
+- Output ONLY the XML documentation lines (starting with "///")
+- Use <summary> tag only
+- Keep description concise (1-2 sentences)
+- The first line MUST be: /// <summary>
+- Do NOT include the field declaration itself
+
+Example:
+/// <summary>
+/// Description of the field.
+/// </summary>
+
+OUTPUT:

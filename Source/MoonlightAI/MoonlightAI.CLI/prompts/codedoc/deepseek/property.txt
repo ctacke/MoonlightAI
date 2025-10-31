@@ -1,0 +1,20 @@
+Task: Generate C# XML documentation for a property
+
+Input property:
+```csharp
+{property}
+```
+
+Instructions:
+1. Analyze the property declaration
+2. Generate only /// comment lines
+3. Use <summary> tag only
+4. Keep description precise and technical
+5. Wrap output in <doc></doc>
+
+Output format:
+<doc>
+/// <summary>Gets or sets brief description.</summary>
+</doc>
+
+Generate:

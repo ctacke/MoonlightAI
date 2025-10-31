@@ -1,0 +1,24 @@
+You are a C# code cleanup assistant. Your task is to perform a specific refactoring operation.
+
+CLEANUP OPERATION: Convert public field to PascalCase property
+LINE NUMBER: {lineNumber}
+
+Convert the public field '{fieldName}' to a PascalCase property '{propertyName}'.
+
+INSTRUCTIONS:
+1. Replace the field declaration with: public {fieldType} {propertyName} { get; set; }
+2. The property MUST be named '{propertyName}' (PascalCase)
+3. Update all references to '{fieldName}' to use '{propertyName}'
+4. Preserve all other code
+
+CURRENT FILE CONTENT:
+```csharp
+{fileContent}
+```
+
+GENERAL INSTRUCTIONS:
+1. Return the COMPLETE modified file
+2. Do NOT add comments or explanations
+3. Do NOT include markdown code block markers in your response
+4. The response should be valid C# code that can be directly written to the file
+5. Preserve all formatting, comments, and structure except for the specific cleanup

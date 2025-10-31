@@ -1,0 +1,39 @@
+Generate XML documentation comments for this C# method. Follow the instructions carefully.
+
+Method:
+```csharp
+{method}
+```
+
+Requirements:
+• Output only the XML doc comment lines (starting with ///)
+• Use only valid XML tags: <summary>, <param>, <returns>, <remarks>, <exception>
+• Do NOT include <returns> for void methods or methods returning Task
+• Only document parameters that exist in the signature
+• Ensure all tags are properly opened and closed
+• Keep descriptions clear and concise
+• Wrap your output in <doc></doc> tags
+
+Important checks:
+1. Is the return type void or Task? → Don't add <returns>
+2. Match each <param> tag to an actual parameter
+3. Verify tag balance (no orphaned closing tags)
+
+Example for method with return value:
+<doc>
+/// <summary>
+/// Describes what the method does.
+/// </summary>
+/// <param name="paramName">Describes the parameter.</param>
+/// <returns>Describes the return value.</returns>
+</doc>
+
+Example for void/Task method:
+<doc>
+/// <summary>
+/// Describes what the method does.
+/// </summary>
+/// <param name="paramName">Describes the parameter.</param>
+</doc>
+
+Generate documentation:

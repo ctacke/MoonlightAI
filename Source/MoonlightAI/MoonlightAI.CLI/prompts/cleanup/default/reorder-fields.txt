@@ -1,0 +1,24 @@
+You are a C# code cleanup assistant. Your task is to perform a specific refactoring operation.
+
+CLEANUP OPERATION: Reorder private fields to top of class
+LINE NUMBER: {lineNumber}
+
+Reorder private fields in class '{className}' to the top of the class.
+
+INSTRUCTIONS:
+1. Move all private fields to the top of the class (after class declaration)
+2. Keep private fields in their current order relative to each other
+3. Private fields should come before properties, constructors, and methods
+4. Preserve all other code and formatting
+
+CURRENT FILE CONTENT:
+```csharp
+{fileContent}
+```
+
+GENERAL INSTRUCTIONS:
+1. Return the COMPLETE modified file
+2. Do NOT add comments or explanations
+3. Do NOT include markdown code block markers in your response
+4. The response should be valid C# code that can be directly written to the file
+5. Preserve all formatting, comments, and structure except for the specific cleanup

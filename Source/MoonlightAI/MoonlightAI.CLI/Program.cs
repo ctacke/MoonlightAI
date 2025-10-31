@@ -12,6 +12,7 @@ using MoonlightAI.Core.Data;
 using MoonlightAI.Core.Git;
 using MoonlightAI.Core.Models;
 using MoonlightAI.Core.Orchestration;
+using MoonlightAI.Core.Prompts;
 using MoonlightAI.Core.Reporting;
 using MoonlightAI.Core.Servers;
 using MoonlightAI.Core.Workloads;
@@ -45,6 +46,9 @@ configuration.GetSection(WorkloadConfiguration.SectionName).Bind(workloadConfig)
 var databaseConfig = new DatabaseConfiguration();
 configuration.GetSection(DatabaseConfiguration.SectionName).Bind(databaseConfig);
 
+var promptConfig = new PromptConfiguration();
+configuration.GetSection(PromptConfiguration.SectionName).Bind(promptConfig);
+
 // Create Terminal UI
 using var ui = new MoonlightTerminalUI(aiServerConfig, repoConfig, workloadConfig, containerConfig, databaseConfig);
 
@@ -68,6 +72,7 @@ services.AddSingleton(repoConfig);
 services.AddSingleton(containerConfig);
 services.AddSingleton(workloadConfig);
 services.AddSingleton(databaseConfig);
+services.AddSingleton(promptConfig);
 
 // Register HttpClient and AI Server
 services.AddHttpClient<IAIServer, CodeLlamaServer>();
@@ -106,6 +111,7 @@ services.AddSingleton<WorkloadOrchestrator>();
 services.AddSingleton<IGitManager, GitManager>();
 services.AddSingleton<RepositoryManager>();
 services.AddSingleton<ICodeAnalyzer, RoslynCodeAnalyzer>();
+services.AddSingleton<PromptService>();
 
 // Register Workload Runners
 services.AddSingleton<CodeDocWorkloadRunner>();

@@ -1,0 +1,21 @@
+Task: Generate C# XML documentation for an event
+
+Input event:
+```csharp
+{event}
+```
+
+Instructions:
+1. Analyze the event declaration
+2. Generate only /// comment lines
+3. Use <summary> tag only
+4. Describe when the event is raised
+5. Keep description precise and technical
+6. Wrap output in <doc></doc>
+
+Output format:
+<doc>
+/// <summary>Raised when something happens.</summary>
+</doc>
+
+Generate:
