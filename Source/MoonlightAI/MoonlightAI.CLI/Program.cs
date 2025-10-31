@@ -152,12 +152,13 @@ ui.AppendLog("  MoonlightAI - AI-Powered Code Documentation");
 ui.AppendLog("═══════════════════════════════════════════════════════════════");
 ui.AppendLog("");
 ui.AppendLog("Available Commands:");
-ui.AppendLog("  run      - Run code documentation workload");
-ui.AppendLog("  stop     - Stop current workload (saves completed work)");
-ui.AppendLog("  report   - View model comparison report");
-ui.AppendLog("  stats    - Show current statistics");
-ui.AppendLog("  clear    - Clear log output");
-ui.AppendLog("  exit     - Exit application");
+ui.AppendLog("  run        - Run code documentation workload");
+ui.AppendLog("  stop       - Stop current workload (saves completed work)");
+ui.AppendLog("  report     - View model comparison report");
+ui.AppendLog("  stats      - Show current statistics");
+ui.AppendLog("  batch X    - Set batch size to X files");
+ui.AppendLog("  clear      - Clear log output");
+ui.AppendLog("  exit       - Exit application");
 ui.AppendLog("");
 ui.AppendLog("Type a command and press Enter to execute.");
 ui.AppendLog("═══════════════════════════════════════════════════════════════");
@@ -226,17 +227,44 @@ static async Task HandleCommandAsync(string command, MoonlightTerminalUI ui, Ser
             case "?":
                 ui.AppendLog("");
                 ui.AppendLog("Available Commands:");
-                ui.AppendLog("  run      - Run code documentation workload");
-                ui.AppendLog("  stop     - Stop current workload (saves completed work)");
-                ui.AppendLog("  report   - View model comparison report");
-                ui.AppendLog("  stats    - Show current statistics");
-                ui.AppendLog("  clear    - Clear log output");
-                ui.AppendLog("  exit     - Exit application");
+                ui.AppendLog("  run        - Run code documentation workload");
+                ui.AppendLog("  stop       - Stop current workload (saves completed work)");
+                ui.AppendLog("  report     - View model comparison report");
+                ui.AppendLog("  stats      - Show current statistics");
+                ui.AppendLog("  batch X    - Set batch size to X files");
+                ui.AppendLog("  clear      - Clear log output");
+                ui.AppendLog("  exit       - Exit application");
                 ui.AppendLog("");
                 break;
 
             default:
-                ui.AppendLog($"Unknown command: '{command}'. Type 'help' for available commands.");
+                // Check if it's a batch command
+                if (cmd.StartsWith("batch "))
+                {
+                    var parts = command.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                    if (parts.Length == 2 && int.TryParse(parts[1], out int newBatchSize))
+                    {
+                        if (newBatchSize > 0)
+                        {
+                            var workloadConfig = serviceProvider.GetRequiredService<WorkloadConfiguration>();
+                            workloadConfig.BatchSize = newBatchSize;
+                            ui.AppendLog($"Batch size updated to {newBatchSize} files.");
+                            ui.UpdateStatus();
+                        }
+                        else
+                        {
+                            ui.AppendLog("ERROR: Batch size must be greater than 0.");
+                        }
+                    }
+                    else
+                    {
+                        ui.AppendLog("ERROR: Invalid batch command. Usage: batch <number>");
+                    }
+                }
+                else
+                {
+                    ui.AppendLog($"Unknown command: '{command}'. Type 'help' for available commands.");
+                }
                 break;
         }
     }

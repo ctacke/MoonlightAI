@@ -230,6 +230,7 @@ Database: {dbPath}";
 
         if (_currentModelStats != null)
         {
+            rightLines.Add($"Total Files: {_currentModelStats.TotalFilesProcessed}");
             rightLines.Add("");
             rightLines.Add("Model Performance:");
             rightLines.Add($"  Success: {_currentModelStats.SuccessRate:F1}%");
