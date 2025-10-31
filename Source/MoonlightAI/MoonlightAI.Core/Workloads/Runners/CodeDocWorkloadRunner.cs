@@ -433,6 +433,20 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
             return false;
         }
 
+        // Validate that the first line contains <summary> tag
+        if (!docLines[0].Trim().Contains("<summary>"))
+        {
+            _logger.LogWarning("Documentation for method {MethodName} does not start with <summary> tag. First line: {FirstLine}",
+                method.Name, docLines[0]);
+
+            // Save prompt and response for debugging
+            await SaveFailedDocumentationAttemptAsync(filePath, method.Name, methodSource,
+                $"Missing <summary> tag\n\nGENERATED DOCUMENTATION:\n{string.Join("\n", docLines)}\n\nAI RESPONSE:\n{aiResponse.Response}",
+                cancellationToken);
+
+            return false;
+        }
+
         // Validate and clean the documentation
         var (cleanedDocLines, sanitizationFixCount) = SanitizeDocumentation(method, docLines);
         if (cleanedDocLines.Count == 0)
@@ -582,6 +596,19 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
             return false;
         }
 
+        // Validate that the first line contains <summary> tag
+        if (!docLines[0].Trim().Contains("<summary>"))
+        {
+            _logger.LogWarning("Documentation for field {FieldName} does not start with <summary> tag. First line: {FirstLine}",
+                field.Name, docLines[0]);
+
+            await SaveFailedDocumentationAttemptAsync(filePath, field.Name, fieldLine,
+                $"Missing <summary> tag\n\nGENERATED DOCUMENTATION:\n{string.Join("\n", docLines)}\n\nAI RESPONSE:\n{aiResponse.Response}",
+                cancellationToken);
+
+            return false;
+        }
+
         // Build new file content
         var sb = new StringBuilder();
 
@@ -705,6 +732,19 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
             return false;
         }
 
+        // Validate that the first line contains <summary> tag
+        if (!docLines[0].Trim().Contains("<summary>"))
+        {
+            _logger.LogWarning("Documentation for property {PropertyName} does not start with <summary> tag. First line: {FirstLine}",
+                property.Name, docLines[0]);
+
+            await SaveFailedDocumentationAttemptAsync(filePath, property.Name, propertyLine,
+                $"Missing <summary> tag\n\nGENERATED DOCUMENTATION:\n{string.Join("\n", docLines)}\n\nAI RESPONSE:\n{aiResponse.Response}",
+                cancellationToken);
+
+            return false;
+        }
+
         // Build new file content
         var sb = new StringBuilder();
 
@@ -825,6 +865,19 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
                 evt.Name, aiResponse.Response.Substring(0, Math.Min(500, aiResponse.Response.Length)));
 
             await SaveFailedDocumentationAttemptAsync(filePath, evt.Name, eventLine, aiResponse.Response, cancellationToken);
+            return false;
+        }
+
+        // Validate that the first line contains <summary> tag
+        if (!docLines[0].Trim().Contains("<summary>"))
+        {
+            _logger.LogWarning("Documentation for event {EventName} does not start with <summary> tag. First line: {FirstLine}",
+                evt.Name, docLines[0]);
+
+            await SaveFailedDocumentationAttemptAsync(filePath, evt.Name, eventLine,
+                $"Missing <summary> tag\n\nGENERATED DOCUMENTATION:\n{string.Join("\n", docLines)}\n\nAI RESPONSE:\n{aiResponse.Response}",
+                cancellationToken);
+
             return false;
         }
 
