@@ -35,6 +35,22 @@
       "SolutionPath": "src/SolutionEngine.slnx",
       "ProjectPath": "src/Engine/Modules/MQTT/SolutionEngine.MQTT.Module/SolutionEngine.MQTT.Module.csproj",
       "DocumentVisibility": "Public"
+    },
+    "CodeCleanup": {
+      "SolutionPath": "src/SolutionEngine.slnx",
+      "ProjectPath": "src/Engine/Modules/MQTT/SolutionEngine.MQTT.Module/SolutionEngine.MQTT.Module.csproj",
+      "Options": {
+        "RemoveUnusedVariables": true,
+        "RemoveUnusedUsings": true,
+        "ConvertPublicFieldsToProperties": true,
+        "ReorderPrivateFields": true,
+        "ExtractMagicNumbers": false,
+        "SimplifyBooleanExpressions": false,
+        "RemoveRedundantCode": false,
+        "SimplifyStringOperations": false,
+        "UseExpressionBodiedMembers": false,
+        "MaxOperationsPerRun": 1
+      }
     }
   },
   "Database": {

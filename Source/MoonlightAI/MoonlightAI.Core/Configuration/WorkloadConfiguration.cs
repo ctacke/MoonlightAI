@@ -38,4 +38,9 @@ public class WorkloadConfiguration
     /// Configuration specific to Code Documentation workloads.
     /// </summary>
     public CodeDocWorkloadConfiguration CodeDocumentation { get; set; } = new();
+
+    /// <summary>
+    /// Configuration specific to Code Cleanup workloads.
+    /// </summary>
+    public CodeCleanupWorkloadConfiguration CodeCleanup { get; set; } = new();
 }

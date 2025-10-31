@@ -135,9 +135,14 @@ public class WorkloadScheduler : IWorkloadScheduler
             case "code-documentation":
                 return await ShouldDocumentFileAsync(filePath, cancellationToken);
 
+            case "codeclean":
+            case "code-cleanup":
+            case "cleanup":
+                // For cleanup, process all valid C# files
+                // The runner will determine if there are cleanup opportunities
+                return true;
+
             // Add more workload types here in the future
-            // case "cleanup":
-            //     return await ShouldCleanupFileAsync(filePath, cancellationToken);
             // case "unittest":
             //     return await ShouldGenerateTestsForFileAsync(filePath, cancellationToken);
 
@@ -185,6 +190,18 @@ public class WorkloadScheduler : IWorkloadScheduler
             case "codedoc":
             case "code-documentation":
                 // Exclude generated files, designer files, etc.
+                if (filePath.EndsWith(".Designer.cs", StringComparison.OrdinalIgnoreCase) ||
+                    filePath.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase) ||
+                    filePath.EndsWith(".g.i.cs", StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+                break;
+
+            case "codeclean":
+            case "code-cleanup":
+            case "cleanup":
+                // Exclude generated files, designer files, etc. for cleanup too
                 if (filePath.EndsWith(".Designer.cs", StringComparison.OrdinalIgnoreCase) ||
                     filePath.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase) ||
                     filePath.EndsWith(".g.i.cs", StringComparison.OrdinalIgnoreCase))
