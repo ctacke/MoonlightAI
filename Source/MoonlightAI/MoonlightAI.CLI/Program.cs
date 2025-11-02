@@ -112,6 +112,7 @@ services.AddSingleton<IGitManager, GitManager>();
 services.AddSingleton<RepositoryManager>();
 services.AddSingleton<ICodeAnalyzer, RoslynCodeAnalyzer>();
 services.AddSingleton<PromptService>();
+services.AddSingleton<CodeDocSanitizer>();
 
 // Register Workload Runners
 services.AddSingleton<CodeDocWorkloadRunner>();

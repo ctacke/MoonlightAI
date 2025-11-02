@@ -19,6 +19,7 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
     private readonly WorkloadConfiguration _workloadConfig;
     private readonly PromptService _promptService;
     private readonly AIServerConfiguration _aiServerConfig;
+    private readonly CodeDocSanitizer _sanitizer;
 
     public CodeDocWorkloadRunner(
         ILogger<CodeDocWorkloadRunner> logger,
@@ -28,7 +29,8 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
         IGitManager gitManager,
         WorkloadConfiguration workloadConfig,
         PromptService promptService,
-        AIServerConfiguration aiServerConfig)
+        AIServerConfiguration aiServerConfig,
+        CodeDocSanitizer sanitizer)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _aiServer = aiServer ?? throw new ArgumentNullException(nameof(aiServer));
@@ -38,6 +40,7 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
         _workloadConfig = workloadConfig ?? throw new ArgumentNullException(nameof(workloadConfig));
         _promptService = promptService ?? throw new ArgumentNullException(nameof(promptService));
         _aiServerConfig = aiServerConfig ?? throw new ArgumentNullException(nameof(aiServerConfig));
+        _sanitizer = sanitizer ?? throw new ArgumentNullException(nameof(sanitizer));
     }
 
     /// <inheritdoc/>
@@ -164,7 +167,7 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
     private async Task<bool> ProcessFileAsync(string filePath, CodeDocWorkload workload, CancellationToken cancellationToken)
     {
         var fileModified = false;
-        var failedMembers = new HashSet<string>(); // Track members that failed to document
+        var processedMembers = new HashSet<string>(); // Track members that have been processed (success or failure)
 
         // Keep processing until no more undocumented members are found
         while (true)
@@ -185,10 +188,13 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
                 // Process methods - document one at a time
                 var undocumentedMethod = classInfo.Methods
                     .Where(m => ShouldDocument(m.Accessibility, workload.DocumentVisibility) && m.XmlDocumentation == null)
-                    .FirstOrDefault(m => !failedMembers.Contains($"{classInfo.Name}.{m.Name}"));
+                    .FirstOrDefault(m => !processedMembers.Contains($"{classInfo.Name}.{m.Name}"));
 
                 if (undocumentedMethod != null)
                 {
+                    var memberKey = $"{classInfo.Name}.{undocumentedMethod.Name}";
+                    processedMembers.Add(memberKey); // Mark as processed immediately to prevent re-processing
+
                     try
                     {
                         var modified = await DocumentMethodAsync(filePath, undocumentedMethod, workload, cancellationToken);
@@ -201,9 +207,7 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
                         }
                         else
                         {
-                            // AI failed to generate valid documentation, mark as failed and continue
-                            var memberKey = $"{classInfo.Name}.{undocumentedMethod.Name}";
-                            failedMembers.Add(memberKey);
+                            // AI failed to generate valid documentation
                             workload.Statistics.ErrorCount++;
                             workload.Statistics.Errors.Add($"Failed to generate documentation: {memberKey}");
                             documentedSomething = true; // Continue processing other members
@@ -212,9 +216,7 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
                     }
                     catch (TimeoutException)
                     {
-                        var memberKey = $"{classInfo.Name}.{undocumentedMethod.Name}";
                         _logger.LogWarning("AI server timed out for method {MethodName} in {FilePath}", undocumentedMethod.Name, filePath);
-                        failedMembers.Add(memberKey);
                         workload.Statistics.ErrorCount++;
                         workload.Statistics.Errors.Add($"Timeout: {memberKey}");
                         documentedSomething = true; // Continue processing other members
@@ -227,10 +229,13 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
                     .Where(f => ShouldDocument(f.Accessibility, workload.DocumentVisibility) &&
                                 f.XmlDocumentation == null &&
                                 (f.IsConst || f.IsReadOnly)) // Only document constants and readonly fields
-                    .FirstOrDefault(f => !failedMembers.Contains($"{classInfo.Name}.{f.Name}"));
+                    .FirstOrDefault(f => !processedMembers.Contains($"{classInfo.Name}.{f.Name}"));
 
                 if (undocumentedField != null)
                 {
+                    var memberKey = $"{classInfo.Name}.{undocumentedField.Name}";
+                    processedMembers.Add(memberKey); // Mark as processed immediately to prevent re-processing
+
                     try
                     {
                         var modified = await DocumentFieldAsync(filePath, undocumentedField, workload, cancellationToken);
@@ -243,9 +248,7 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
                         }
                         else
                         {
-                            // AI failed to generate valid documentation, mark as failed and continue
-                            var memberKey = $"{classInfo.Name}.{undocumentedField.Name}";
-                            failedMembers.Add(memberKey);
+                            // AI failed to generate valid documentation
                             workload.Statistics.ErrorCount++;
                             workload.Statistics.Errors.Add($"Failed to generate documentation: {memberKey}");
                             documentedSomething = true;
@@ -254,9 +257,7 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
                     }
                     catch (TimeoutException)
                     {
-                        var memberKey = $"{classInfo.Name}.{undocumentedField.Name}";
                         _logger.LogWarning("AI server timed out for field {FieldName} in {FilePath}", undocumentedField.Name, filePath);
-                        failedMembers.Add(memberKey);
                         workload.Statistics.ErrorCount++;
                         workload.Statistics.Errors.Add($"Timeout: {memberKey}");
                         documentedSomething = true;
@@ -267,10 +268,13 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
                 // Process properties - document one at a time
                 var undocumentedProperty = classInfo.Properties
                     .Where(p => ShouldDocument(p.Accessibility, workload.DocumentVisibility) && p.XmlDocumentation == null)
-                    .FirstOrDefault(p => !failedMembers.Contains($"{classInfo.Name}.{p.Name}"));
+                    .FirstOrDefault(p => !processedMembers.Contains($"{classInfo.Name}.{p.Name}"));
 
                 if (undocumentedProperty != null)
                 {
+                    var memberKey = $"{classInfo.Name}.{undocumentedProperty.Name}";
+                    processedMembers.Add(memberKey); // Mark as processed immediately to prevent re-processing
+
                     try
                     {
                         var modified = await DocumentPropertyAsync(filePath, undocumentedProperty, workload, cancellationToken);
@@ -283,9 +287,7 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
                         }
                         else
                         {
-                            // AI failed to generate valid documentation, mark as failed and continue
-                            var memberKey = $"{classInfo.Name}.{undocumentedProperty.Name}";
-                            failedMembers.Add(memberKey);
+                            // AI failed to generate valid documentation
                             workload.Statistics.ErrorCount++;
                             workload.Statistics.Errors.Add($"Failed to generate documentation: {memberKey}");
                             documentedSomething = true;
@@ -294,9 +296,7 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
                     }
                     catch (TimeoutException)
                     {
-                        var memberKey = $"{classInfo.Name}.{undocumentedProperty.Name}";
                         _logger.LogWarning("AI server timed out for property {PropertyName} in {FilePath}", undocumentedProperty.Name, filePath);
-                        failedMembers.Add(memberKey);
                         workload.Statistics.ErrorCount++;
                         workload.Statistics.Errors.Add($"Timeout: {memberKey}");
                         documentedSomething = true;
@@ -307,10 +307,13 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
                 // Process events - document one at a time
                 var undocumentedEvent = classInfo.Events
                     .Where(e => ShouldDocument(e.Accessibility, workload.DocumentVisibility) && e.XmlDocumentation == null)
-                    .FirstOrDefault(e => !failedMembers.Contains($"{classInfo.Name}.{e.Name}"));
+                    .FirstOrDefault(e => !processedMembers.Contains($"{classInfo.Name}.{e.Name}"));
 
                 if (undocumentedEvent != null)
                 {
+                    var memberKey = $"{classInfo.Name}.{undocumentedEvent.Name}";
+                    processedMembers.Add(memberKey); // Mark as processed immediately to prevent re-processing
+
                     try
                     {
                         var modified = await DocumentEventAsync(filePath, undocumentedEvent, workload, cancellationToken);
@@ -323,9 +326,7 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
                         }
                         else
                         {
-                            // AI failed to generate valid documentation, mark as failed and continue
-                            var memberKey = $"{classInfo.Name}.{undocumentedEvent.Name}";
-                            failedMembers.Add(memberKey);
+                            // AI failed to generate valid documentation
                             workload.Statistics.ErrorCount++;
                             workload.Statistics.Errors.Add($"Failed to generate documentation: {memberKey}");
                             documentedSomething = true;
@@ -334,9 +335,7 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
                     }
                     catch (TimeoutException)
                     {
-                        var memberKey = $"{classInfo.Name}.{undocumentedEvent.Name}";
                         _logger.LogWarning("AI server timed out for event {EventName} in {FilePath}", undocumentedEvent.Name, filePath);
-                        failedMembers.Add(memberKey);
                         workload.Statistics.ErrorCount++;
                         workload.Statistics.Errors.Add($"Timeout: {memberKey}");
                         documentedSomething = true;
@@ -376,6 +375,7 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
         };
     }
 
+
     private async Task<bool> DocumentMethodAsync(string filePath, Models.Analysis.MethodInfo method, CodeDocWorkload workload, CancellationToken cancellationToken)
     {
         _logger.LogInformation("Generating documentation for method {MethodName} at line {LineNumber}", method.Name, method.FirstLineNumber);
@@ -409,53 +409,19 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
         // Calculate indentation
         var indentation = new string(' ', originalContentLines[method.FirstLineNumber - 1].TakeWhile(c => c == ' ').Count());
 
-        // Parse and clean documentation lines - try to extract from various formats
-        var response = aiResponse.Response.Trim();
+        // Perform common sanitization and validation checks
+        var (isValid, docLines) = _sanitizer.SanitizeAndValidateDocumentation(
+            aiResponse.Response,
+            indentation,
+            method.Name);
 
-        // Try to extract documentation from <doc> tags if present
-        var docMatch = System.Text.RegularExpressions.Regex.Match(response, @"<doc>\s*(.*?)\s*</doc>",
-            System.Text.RegularExpressions.RegexOptions.Singleline);
-        if (docMatch.Success)
+        if (!isValid)
         {
-            response = docMatch.Groups[1].Value;
-        }
-
-        // Parse and clean documentation lines
-        var docLines = response
-            .Trim('`')
-            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
-            .Select(l => l.Trim())
-            .Where(l => l.StartsWith("///"))
-            .Select(l => $"{indentation}{l.TrimEnd('\r', '\n')}")
-            .ToList();
-
-        if (docLines.Count == 0)
-        {
-            _logger.LogWarning("No valid documentation lines generated for method {MethodName}. AI Response: {Response}",
-                method.Name, aiResponse.Response.Substring(0, Math.Min(500, aiResponse.Response.Length)));
-
-            // Save prompt and response for debugging
-            await SaveFailedDocumentationAttemptAsync(filePath, method.Name, methodSource, aiResponse.Response, cancellationToken);
-
             return false;
         }
 
-        // Validate that the first line contains <summary> tag
-        if (!docLines[0].Trim().Contains("<summary>"))
-        {
-            _logger.LogWarning("Documentation for method {MethodName} does not start with <summary> tag. First line: {FirstLine}",
-                method.Name, docLines[0]);
-
-            // Save prompt and response for debugging
-            await SaveFailedDocumentationAttemptAsync(filePath, method.Name, methodSource,
-                $"Missing <summary> tag\n\nGENERATED DOCUMENTATION:\n{string.Join("\n", docLines)}\n\nAI RESPONSE:\n{aiResponse.Response}",
-                cancellationToken);
-
-            return false;
-        }
-
-        // Validate and clean the documentation
-        var (cleanedDocLines, sanitizationFixCount) = SanitizeDocumentation(method, docLines);
+        // Perform method-specific validation and sanitization
+        var (cleanedDocLines, sanitizationFixCount) = _sanitizer.SanitizeMethodDocumentation(method, docLines);
         if (cleanedDocLines.Count == 0)
         {
             _logger.LogWarning("No valid documentation lines remain after sanitization for method {MethodName}",
@@ -559,45 +525,14 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
         // Calculate indentation
         var indentation = new string(' ', originalContentLines[field.FirstLineNumber - 1].TakeWhile(c => c == ' ').Count());
 
-        // Parse and clean documentation lines
-        var response = aiResponse.Response.Trim();
+        // Perform common sanitization and validation checks
+        var (isValid, docLines) = _sanitizer.SanitizeAndValidateDocumentation(
+            aiResponse.Response,
+            indentation,
+            field.Name);
 
-        // Try to extract documentation from <doc> tags if present
-        var docMatch = System.Text.RegularExpressions.Regex.Match(response, @"<doc>\s*(.*?)\s*</doc>",
-            System.Text.RegularExpressions.RegexOptions.Singleline);
-        if (docMatch.Success)
+        if (!isValid)
         {
-            response = docMatch.Groups[1].Value;
-        }
-
-        // Parse and clean documentation lines
-        var docLines = response
-            .Trim('`')
-            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
-            .Select(l => l.Trim())
-            .Where(l => l.StartsWith("///"))
-            .Select(l => $"{indentation}{l.TrimEnd('\r', '\n')}")
-            .ToList();
-
-        if (docLines.Count == 0)
-        {
-            _logger.LogWarning("No valid documentation lines generated for field {FieldName}. AI Response: {Response}",
-                field.Name, aiResponse.Response.Substring(0, Math.Min(500, aiResponse.Response.Length)));
-
-            await SaveFailedDocumentationAttemptAsync(filePath, field.Name, fieldLine, aiResponse.Response, cancellationToken);
-            return false;
-        }
-
-        // Validate that the first line contains <summary> tag
-        if (!docLines[0].Trim().Contains("<summary>"))
-        {
-            _logger.LogWarning("Documentation for field {FieldName} does not start with <summary> tag. First line: {FirstLine}",
-                field.Name, docLines[0]);
-
-            await SaveFailedDocumentationAttemptAsync(filePath, field.Name, fieldLine,
-                $"Missing <summary> tag\n\nGENERATED DOCUMENTATION:\n{string.Join("\n", docLines)}\n\nAI RESPONSE:\n{aiResponse.Response}",
-                cancellationToken);
-
             return false;
         }
 
@@ -680,45 +615,14 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
         // Calculate indentation
         var indentation = new string(' ', originalContentLines[property.FirstLineNumber - 1].TakeWhile(c => c == ' ').Count());
 
-        // Parse and clean documentation lines
-        var response = aiResponse.Response.Trim();
+        // Perform common sanitization and validation checks
+        var (isValid, docLines) = _sanitizer.SanitizeAndValidateDocumentation(
+            aiResponse.Response,
+            indentation,
+            property.Name);
 
-        // Try to extract documentation from <doc> tags if present
-        var docMatch = System.Text.RegularExpressions.Regex.Match(response, @"<doc>\s*(.*?)\s*</doc>",
-            System.Text.RegularExpressions.RegexOptions.Singleline);
-        if (docMatch.Success)
+        if (!isValid)
         {
-            response = docMatch.Groups[1].Value;
-        }
-
-        // Parse and clean documentation lines
-        var docLines = response
-            .Trim('`')
-            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
-            .Select(l => l.Trim())
-            .Where(l => l.StartsWith("///"))
-            .Select(l => $"{indentation}{l.TrimEnd('\r', '\n')}")
-            .ToList();
-
-        if (docLines.Count == 0)
-        {
-            _logger.LogWarning("No valid documentation lines generated for property {PropertyName}. AI Response: {Response}",
-                property.Name, aiResponse.Response.Substring(0, Math.Min(500, aiResponse.Response.Length)));
-
-            await SaveFailedDocumentationAttemptAsync(filePath, property.Name, propertyLine, aiResponse.Response, cancellationToken);
-            return false;
-        }
-
-        // Validate that the first line contains <summary> tag
-        if (!docLines[0].Trim().Contains("<summary>"))
-        {
-            _logger.LogWarning("Documentation for property {PropertyName} does not start with <summary> tag. First line: {FirstLine}",
-                property.Name, docLines[0]);
-
-            await SaveFailedDocumentationAttemptAsync(filePath, property.Name, propertyLine,
-                $"Missing <summary> tag\n\nGENERATED DOCUMENTATION:\n{string.Join("\n", docLines)}\n\nAI RESPONSE:\n{aiResponse.Response}",
-                cancellationToken);
-
             return false;
         }
 
@@ -801,45 +705,14 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
         // Calculate indentation
         var indentation = new string(' ', originalContentLines[evt.FirstLineNumber - 1].TakeWhile(c => c == ' ').Count());
 
-        // Parse and clean documentation lines
-        var response = aiResponse.Response.Trim();
+        // Perform common sanitization and validation checks
+        var (isValid, docLines) = _sanitizer.SanitizeAndValidateDocumentation(
+            aiResponse.Response,
+            indentation,
+            evt.Name);
 
-        // Try to extract documentation from <doc> tags if present
-        var docMatch = System.Text.RegularExpressions.Regex.Match(response, @"<doc>\s*(.*?)\s*</doc>",
-            System.Text.RegularExpressions.RegexOptions.Singleline);
-        if (docMatch.Success)
+        if (!isValid)
         {
-            response = docMatch.Groups[1].Value;
-        }
-
-        // Parse and clean documentation lines
-        var docLines = response
-            .Trim('`')
-            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
-            .Select(l => l.Trim())
-            .Where(l => l.StartsWith("///"))
-            .Select(l => $"{indentation}{l.TrimEnd('\r', '\n')}")
-            .ToList();
-
-        if (docLines.Count == 0)
-        {
-            _logger.LogWarning("No valid documentation lines generated for event {EventName}. AI Response: {Response}",
-                evt.Name, aiResponse.Response.Substring(0, Math.Min(500, aiResponse.Response.Length)));
-
-            await SaveFailedDocumentationAttemptAsync(filePath, evt.Name, eventLine, aiResponse.Response, cancellationToken);
-            return false;
-        }
-
-        // Validate that the first line contains <summary> tag
-        if (!docLines[0].Trim().Contains("<summary>"))
-        {
-            _logger.LogWarning("Documentation for event {EventName} does not start with <summary> tag. First line: {FirstLine}",
-                evt.Name, docLines[0]);
-
-            await SaveFailedDocumentationAttemptAsync(filePath, evt.Name, eventLine,
-                $"Missing <summary> tag\n\nGENERATED DOCUMENTATION:\n{string.Join("\n", docLines)}\n\nAI RESPONSE:\n{aiResponse.Response}",
-                cancellationToken);
-
             return false;
         }
 
@@ -943,134 +816,6 @@ public class CodeDocWorkloadRunner : IWorkloadRunner<CodeDocWorkload>
                "🤖 Generated with [MoonlightAI](https://github.com/ctacke/MoonlightAI)";
 
         return body;
-    }
-
-    /// <summary>
-    /// Sanitizes documentation by removing invalid tags while keeping valid content.
-    /// </summary>
-    /// <returns>A tuple containing the sanitized lines and the count of fixes applied.</returns>
-    private (List<string> sanitizedLines, int fixCount) SanitizeDocumentation(Models.Analysis.MethodInfo method, List<string> docLines)
-    {
-        var sanitizedLines = new List<string>();
-        var actualParamNames = method.Parameters.Select(p => p.Name).ToHashSet();
-        var isVoidMethod = method.ReturnType.Equals("void", StringComparison.OrdinalIgnoreCase) ||
-                           method.ReturnType.Equals("Task", StringComparison.OrdinalIgnoreCase);
-
-        var warningsLogged = new List<string>();
-        int fixCount = 0;
-
-        // Track open tags to detect orphaned closing tags
-        var openTags = new Stack<string>();
-        var validXmlTags = new HashSet<string> { "summary", "remarks", "param", "returns", "exception", "example", "see", "seealso", "value", "typeparam" };
-
-        foreach (var line in docLines)
-        {
-            // Remove trailing backslashes that AI sometimes adds
-            var cleanedLine = line.TrimEnd('\\');
-            var trimmedLine = cleanedLine.Trim();
-            bool skipLine = false;
-
-            // Check for <returns> tag on void methods - strip it out
-            if (isVoidMethod && (trimmedLine.Contains("<returns>") || trimmedLine.Contains("</returns>")))
-            {
-                var warning = $"Stripped <returns> tag from void method {method.ReturnType}";
-                if (!warningsLogged.Contains(warning))
-                {
-                    _logger.LogWarning(warning);
-                    warningsLogged.Add(warning);
-                }
-                fixCount++;
-                skipLine = true;
-            }
-
-            // Check for hallucinated parameters - strip them out
-            var paramMatch = System.Text.RegularExpressions.Regex.Match(trimmedLine, @"<param name=""([^""]+)"">");
-            if (paramMatch.Success)
-            {
-                var paramName = paramMatch.Groups[1].Value;
-                if (!actualParamNames.Contains(paramName))
-                {
-                    var warning = $"Stripped invalid parameter '{paramName}' from documentation";
-                    if (!warningsLogged.Contains(warning))
-                    {
-                        _logger.LogWarning(warning);
-                        warningsLogged.Add(warning);
-                    }
-                    fixCount++;
-                    skipLine = true;
-                }
-            }
-
-            // Check for orphaned closing tags (closing tag without matching opening tag)
-            if (!skipLine)
-            {
-                // Find all opening and closing tags in this line
-                var openTagMatches = System.Text.RegularExpressions.Regex.Matches(trimmedLine, @"<(\w+)(?:\s|>)");
-                var closeTagMatches = System.Text.RegularExpressions.Regex.Matches(trimmedLine, @"</(\w+)>");
-
-                // Process opening tags
-                foreach (System.Text.RegularExpressions.Match match in openTagMatches)
-                {
-                    var tagName = match.Groups[1].Value;
-                    if (validXmlTags.Contains(tagName))
-                    {
-                        openTags.Push(tagName);
-                    }
-                }
-
-                // Process closing tags
-                foreach (System.Text.RegularExpressions.Match match in closeTagMatches)
-                {
-                    var tagName = match.Groups[1].Value;
-                    if (validXmlTags.Contains(tagName))
-                    {
-                        if (openTags.Count > 0 && openTags.Peek() == tagName)
-                        {
-                            openTags.Pop();
-                        }
-                        else
-                        {
-                            // Orphaned closing tag!
-                            var warning = $"Stripped orphaned closing tag </{tagName}> with no matching opening tag";
-                            if (!warningsLogged.Contains(warning))
-                            {
-                                _logger.LogWarning(warning);
-                                warningsLogged.Add(warning);
-                            }
-                            fixCount++;
-                            skipLine = true;
-                            break;
-                        }
-                    }
-                }
-            }
-
-            // Keep valid lines
-            if (!skipLine)
-            {
-                sanitizedLines.Add(cleanedLine);
-            }
-        }
-
-        // Log warnings for missing documentation (but don't strip anything)
-        if (!isVoidMethod && !string.Join("\n", sanitizedLines).Contains("<returns>"))
-        {
-            _logger.LogWarning("Method returns {ReturnType} but documentation is missing <returns> tag (will be kept anyway)", method.ReturnType);
-        }
-
-        var documentedParams = System.Text.RegularExpressions.Regex.Matches(string.Join("\n", sanitizedLines), @"<param name=""([^""]+)"">")
-            .Select(m => m.Groups[1].Value)
-            .ToHashSet();
-
-        foreach (var param in method.Parameters)
-        {
-            if (!documentedParams.Contains(param.Name))
-            {
-                _logger.LogWarning("Parameter '{ParamName}' is not documented (will be kept anyway)", param.Name);
-            }
-        }
-
-        return (sanitizedLines, fixCount);
     }
 
     private async Task SaveFailedDocumentationAttemptAsync(
