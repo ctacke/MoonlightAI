@@ -201,54 +201,6 @@ Using an RTX 3060 with 12GB or VRAM, I find that Mistral 7b-Instruct actually ge
 
 ---
 
-## 📊 Database & Statistics
-
-MoonlightAI tracks all activity in a SQLite database for performance analysis and model comparison.
-
-### What's Tracked
-
-**Workload Runs:**
-- Start/end times
-- Success/failure status
-- Files processed
-- Build failures and retries
-- Total tokens used
-
-**File Results:**
-- Members processed
-- Members documented
-- Errors encountered
-
-**AI Interactions:**
-- Prompt and response tokens
-- Processing time
-- Sanitization fixes applied
-
-**Build Attempts:**
-- Build success/failure
-- Error messages
-- Fix attempts
-
-### Model Comparison Report
-
-View statistics across all models you've tested:
-
-```
-run doc          # Use model A
-[switch to model B in config]
-run doc          # Use model B
-report           # Compare performance
-```
-
-**Report includes:**
-- Success rate by model
-- Average sanitization fixes (hallucination rate)
-- Tokens per file
-- Build failure rate
-- Total files processed
-
----
-
 ## 🔄 Development Status
 
 ### ✅ Fully Implemented
@@ -257,11 +209,9 @@ report           # Compare performance
 - Git repository management (clone, branch, commit, PR)
 - Docker container management (auto-start/stop)
 - **Code Documentation Workload** (methods, properties, fields, events)
-- **Code Cleanup Workload** (multiple operations)
 - Build validation with AI error correction
 - Database tracking and model comparison
 - Terminal UI with real-time progress
-- Comprehensive test coverage
 
 ### ⏳ In Progress
 
