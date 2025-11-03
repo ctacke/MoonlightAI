@@ -10,6 +10,12 @@ public class CodeDocSanitizer
 {
     private readonly ILogger<CodeDocSanitizer> _logger;
 
+    // XML documentation tags that should only appear once per documentation block
+    private static readonly HashSet<string> SingleOccurrenceTags = new()
+    {
+        "summary", "remarks", "returns", "value", "example", "inheritdoc"
+    };
+
     public CodeDocSanitizer(ILogger<CodeDocSanitizer> logger)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -159,18 +165,22 @@ public class CodeDocSanitizer
     }
 
     /// <summary>
-    /// Validates that documentation has only ONE &lt;summary&gt; opening tag (prevents duplicate summaries).
+    /// Validates that single-occurrence tags (summary, remarks, returns, value, example, inheritdoc) appear at most once.
     /// </summary>
-    public bool ValidateOnlyOneSummaryTag(List<string> docLines, string memberName)
+    public bool ValidateSingleOccurrenceTags(List<string> docLines, string memberName)
     {
-        var summaryCount = docLines.Count(line => line.Contains("<summary>"));
-
-        if (summaryCount > 1)
+        foreach (var tagName in SingleOccurrenceTags)
         {
-            _logger.LogWarning("Documentation for {MemberName} contains {Count} <summary> tags. Only one is allowed. " +
-                "AI likely generated documentation for multiple members at once.",
-                memberName, summaryCount);
-            return false;
+            var count = docLines.Count(line => line.Contains($"<{tagName}>"));
+
+            if (count > 1)
+            {
+                _logger.LogWarning(
+                    "Documentation for {MemberName} contains {Count} <{TagName}> tags. " +
+                    "Only one is allowed. AI likely hallucinated documentation.",
+                    memberName, count, tagName);
+                return false;
+            }
         }
 
         return true;
@@ -211,8 +221,8 @@ public class CodeDocSanitizer
             return (false, docLines);
         }
 
-        // Step 7: Validate only one summary tag (prevent duplicate summaries)
-        if (!ValidateOnlyOneSummaryTag(docLines, memberName))
+        // Step 7: Validate single-occurrence tags (prevent duplicate summary, remarks, returns, etc.)
+        if (!ValidateSingleOccurrenceTags(docLines, memberName))
         {
             return (false, docLines);
         }
