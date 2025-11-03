@@ -232,6 +232,7 @@ public class CodeDocSanitizer
 
     /// <summary>
     /// Performs method-specific sanitization: validates parameters and return type.
+    /// Removes invalid parameters, duplicate parameters, invalid returns tags, and orphaned closing tags.
     /// </summary>
     public (List<string> sanitizedLines, int fixCount) SanitizeMethodDocumentation(MethodInfo method, List<string> docLines)
     {
@@ -241,6 +242,7 @@ public class CodeDocSanitizer
                            method.ReturnType.Equals("Task", StringComparison.OrdinalIgnoreCase);
 
         var warningsLogged = new List<string>();
+        var documentedParamsSoFar = new HashSet<string>(); // Track which params have been documented to prevent duplicates
         int fixCount = 0;
 
         // Track open tags to detect orphaned closing tags
@@ -267,14 +269,16 @@ public class CodeDocSanitizer
                 skipLine = true;
             }
 
-            // Check for hallucinated parameters - strip them out
+            // Check for hallucinated or duplicate parameters - strip them out
             var paramMatch = System.Text.RegularExpressions.Regex.Match(trimmedLine, @"<param name=""([^""]+)"">");
             if (paramMatch.Success)
             {
                 var paramName = paramMatch.Groups[1].Value;
+
+                // Check if parameter doesn't exist in method signature
                 if (!actualParamNames.Contains(paramName))
                 {
-                    var warning = $"Stripped invalid parameter '{paramName}' from documentation";
+                    var warning = $"Stripped invalid parameter '{paramName}' from documentation (parameter does not exist)";
                     if (!warningsLogged.Contains(warning))
                     {
                         _logger.LogWarning(warning);
@@ -282,6 +286,23 @@ public class CodeDocSanitizer
                     }
                     fixCount++;
                     skipLine = true;
+                }
+                // Check if parameter has already been documented (duplicate)
+                else if (documentedParamsSoFar.Contains(paramName))
+                {
+                    var warning = $"Stripped duplicate <param> tag for '{paramName}' (parameter already documented)";
+                    if (!warningsLogged.Contains(warning))
+                    {
+                        _logger.LogWarning(warning);
+                        warningsLogged.Add(warning);
+                    }
+                    fixCount++;
+                    skipLine = true;
+                }
+                else
+                {
+                    // Valid parameter, first occurrence - track it
+                    documentedParamsSoFar.Add(paramName);
                 }
             }
 
