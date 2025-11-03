@@ -1,6 +1,6 @@
 # MoonlightAI
 
-MoonlighAI is a nightly AI assistant designed to pull code and do menial tasks for developers while they do other, more interesting things.
+MoonlightAI is a nightly AI assistant designed to pull code and do menial tasks for developers while they do other, more interesting things.
 
 ## Process
 
