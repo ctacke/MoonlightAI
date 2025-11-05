@@ -270,13 +270,26 @@ public class CodeDocSanitizer
             }
 
             // Check for hallucinated or duplicate parameters - strip them out
-            var paramMatch = System.Text.RegularExpressions.Regex.Match(trimmedLine, @"<param name=""([^""]+)"">");
+            // Note: Using [^""]* (zero or more) to also catch empty parameter names like <param name="">
+            var paramMatch = System.Text.RegularExpressions.Regex.Match(trimmedLine, @"<param name=""([^""]*)"">");
             if (paramMatch.Success)
             {
                 var paramName = paramMatch.Groups[1].Value;
 
+                // Check if parameter name is empty
+                if (string.IsNullOrWhiteSpace(paramName))
+                {
+                    var warning = "Stripped <param> tag with empty name attribute";
+                    if (!warningsLogged.Contains(warning))
+                    {
+                        _logger.LogWarning(warning);
+                        warningsLogged.Add(warning);
+                    }
+                    fixCount++;
+                    skipLine = true;
+                }
                 // Check if parameter doesn't exist in method signature
-                if (!actualParamNames.Contains(paramName))
+                else if (!actualParamNames.Contains(paramName))
                 {
                     var warning = $"Stripped invalid parameter '{paramName}' from documentation (parameter does not exist)";
                     if (!warningsLogged.Contains(warning))
