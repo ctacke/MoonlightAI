@@ -915,5 +915,23 @@ public class CodeDocSanitizerTests
         Assert.Equal(0, fixCount);
     }
 
+    [Fact]
+    public void SanitizeMethodDocumentation_RemovesEmptyParameterName_Correctly()
+    {
+        // Arrange
+        var method = CreateTestMethod("TestMethod", "void");
+        var docLines = CreateDocLines(
+            "    /// <summary>Test</summary>",
+            "    /// <param name=\"\">No parameters for this method.</param>");
+
+        // Act
+        var (sanitized, fixCount) = _sanitizer.SanitizeMethodDocumentation(method, docLines);
+
+        // Assert
+        Assert.Single(sanitized);
+        Assert.DoesNotContain(sanitized, line => line.Contains("<param"));
+        Assert.True(fixCount > 0);
+    }
+
     #endregion
 }
