@@ -28,13 +28,13 @@ public class WorkloadScheduler : IWorkloadScheduler
         string repositoryPath,
         RepositoryConfiguration repoConfig,
         string workloadType,
-        string? projectPath = null,
+        HashSet<string>? ignoreProjects = null,
         CancellationToken cancellationToken = default)
     {
         _logger.LogInformation("Selecting files for workload type: {WorkloadType}", workloadType);
 
         // Discover candidate files
-        var candidateFiles = DiscoverCandidateFiles(repositoryPath, projectPath);
+        var candidateFiles = DiscoverCandidateFiles(repositoryPath, ignoreProjects);
         _logger.LogInformation("Found {Count} candidate files", candidateFiles.Count);
 
         // Get files that are already in open PRs
@@ -152,21 +152,73 @@ public class WorkloadScheduler : IWorkloadScheduler
         }
     }
 
-    private List<string> DiscoverCandidateFiles(string repositoryPath, string? projectPath)
+    private List<string> DiscoverCandidateFiles(string repositoryPath, HashSet<string>? ignoreProjects)
     {
-        // Always search the entire repository, not just a single project
-        // The projectPath parameter is used for context but not for limiting scope
-        var searchPath = repositoryPath;
-
         _logger.LogInformation("Searching entire repository: {SearchPath}", repositoryPath);
 
+        if (ignoreProjects != null && ignoreProjects.Count > 0)
+        {
+            _logger.LogInformation("Ignoring projects: {IgnoreProjects}", string.Join(", ", ignoreProjects));
+        }
+
         // Find all C# files, excluding obj and bin directories
-        var csFiles = Directory.GetFiles(searchPath, "*.cs", SearchOption.AllDirectories)
+        var csFiles = Directory.GetFiles(repositoryPath, "*.cs", SearchOption.AllDirectories)
             .Where(f => !f.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar) &&
                        !f.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar))
             .ToList();
 
+        // Filter out files from ignored projects
+        if (ignoreProjects != null && ignoreProjects.Count > 0)
+        {
+            var filteredFiles = new List<string>();
+
+            foreach (var file in csFiles)
+            {
+                // Find the .csproj file that contains this .cs file
+                var projectFile = FindContainingProject(file, repositoryPath);
+
+                if (projectFile != null)
+                {
+                    var projectFileName = Path.GetFileName(projectFile);
+
+                    // Skip if this project is in the ignore list
+                    if (ignoreProjects.Contains(projectFileName))
+                    {
+                        _logger.LogDebug("Skipping file {File} (project {Project} is ignored)", Path.GetFileName(file), projectFileName);
+                        continue;
+                    }
+                }
+
+                filteredFiles.Add(file);
+            }
+
+            _logger.LogInformation("Filtered {Original} files down to {Filtered} files after ignoring projects", csFiles.Count, filteredFiles.Count);
+            return filteredFiles;
+        }
+
         return csFiles;
+    }
+
+    /// <summary>
+    /// Finds the .csproj file that contains a given .cs file by walking up the directory tree.
+    /// </summary>
+    private string? FindContainingProject(string csFilePath, string repositoryPath)
+    {
+        var directory = Path.GetDirectoryName(csFilePath);
+
+        while (directory != null && directory.StartsWith(repositoryPath))
+        {
+            var csprojFiles = Directory.GetFiles(directory, "*.csproj");
+
+            if (csprojFiles.Length > 0)
+            {
+                return csprojFiles[0]; // Return the first .csproj found
+            }
+
+            directory = Path.GetDirectoryName(directory);
+        }
+
+        return null; // No project file found
     }
 
     private bool IsValidCandidateFile(string filePath, string workloadType)

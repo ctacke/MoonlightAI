@@ -18,7 +18,7 @@ Performs automated refactoring and code quality improvements.
 {
   "Workload": {
     "SolutionPath": "MyProject.sln",
-    "ProjectPath": "src/MyProject",
+    "IgnoreProjects": ["MyProject.Tests.csproj"],
     "CodeCleanup": {
       "Options": {
         "RemoveUnusedVariables": true,
@@ -37,4 +37,4 @@ Performs automated refactoring and code quality improvements.
 }
 ```
 
-Note: `SolutionPath` and `ProjectPath` are configured at the parent Workload level and shared across all workload types. See [Configuration Guide](configuration.md) for details.
+Note: `SolutionPath` and `IgnoreProjects` are configured at the parent Workload level. By default, all projects in the solution are processed. See [Configuration Guide](configuration.md) for details.

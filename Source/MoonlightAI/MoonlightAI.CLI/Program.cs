@@ -386,11 +386,11 @@ static async Task ExecuteDocumentationWorkloadAsync(MoonlightTerminalUI ui, Serv
         }
 
         // Execute code documentation for the repository with progress updates
-        // Project and solution paths come from workload configuration
+        // Solution path and ignore projects come from workload configuration
         var result = await orchestrator.ExecuteCodeDocumentationAsync(
             repositoryUrl: repositoryUrl,
-            projectPath: null,  // Uses configuration value
             solutionPath: null, // Uses configuration value
+            ignoreProjects: null, // Uses configuration value
             progress: progressCallback,
             cancellationToken: cancellationToken);
 
@@ -510,10 +510,11 @@ static async Task ExecuteCleanupWorkloadAsync(MoonlightTerminalUI ui, ServicePro
         }
 
         // Execute code cleanup for the repository with progress updates
+        // Solution path and ignore projects come from workload configuration
         var result = await orchestrator.ExecuteCodeCleanupAsync(
             repositoryUrl: repositoryUrl,
-            projectPath: null,  // Uses configuration value
             solutionPath: null, // Uses configuration value
+            ignoreProjects: null, // Uses configuration value
             progress: progressCallback,
             cancellationToken: cancellationToken);
 

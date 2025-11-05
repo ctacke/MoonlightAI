@@ -212,8 +212,8 @@ public class WorkloadOrchestrator
     /// </summary>
     public async Task<BatchWorkloadResult> ExecuteCodeDocumentationAsync(
         string repositoryUrl,
-        string? projectPath = null,
         string? solutionPath = null,
+        HashSet<string>? ignoreProjects = null,
         IProgress<int>? progress = null,
         CancellationToken cancellationToken = default)
     {
@@ -221,12 +221,15 @@ public class WorkloadOrchestrator
         var batchResult = new BatchWorkloadResult { WorkloadResults = results };
 
         // Use configuration values if parameters not provided
-        var effectiveProjectPath = projectPath ?? _workloadConfig.ProjectPath;
         var effectiveSolutionPath = solutionPath ?? _workloadConfig.SolutionPath;
+        var effectiveIgnoreProjects = ignoreProjects ?? _workloadConfig.IgnoreProjects;
 
         _logger.LogInformation("Starting code documentation for repository {RepositoryUrl}", repositoryUrl);
-        _logger.LogInformation("Using project path: {ProjectPath}", effectiveProjectPath);
         _logger.LogInformation("Using solution path: {SolutionPath}", effectiveSolutionPath);
+        if (effectiveIgnoreProjects.Count > 0)
+        {
+            _logger.LogInformation("Ignoring projects: {IgnoreProjects}", string.Join(", ", effectiveIgnoreProjects));
+        }
 
         // Variables for database tracking and workload execution
         WorkloadRunRecord? runRecord = null;
@@ -323,7 +326,7 @@ public class WorkloadOrchestrator
                 repositoryPath,
                 repoConfig,
                 "codedoc",
-                effectiveProjectPath,
+                effectiveIgnoreProjects,
                 cancellationToken);
 
             if (!allFilesToDocument.Any())
@@ -366,7 +369,6 @@ public class WorkloadOrchestrator
                 var workload = new CodeDocWorkload
                 {
                     RepositoryUrl = repositoryUrl,
-                    ProjectPath = effectiveProjectPath,
                     SolutionPath = effectiveSolutionPath,
                     FilePath = filePath,
                     DocumentVisibility = ParseDocumentVisibility(_workloadConfig.CodeDocumentation.DocumentVisibility)
@@ -590,8 +592,8 @@ public class WorkloadOrchestrator
     /// </summary>
     public async Task<BatchWorkloadResult> ExecuteCodeCleanupAsync(
         string repositoryUrl,
-        string? projectPath = null,
         string? solutionPath = null,
+        HashSet<string>? ignoreProjects = null,
         IProgress<int>? progress = null,
         CancellationToken cancellationToken = default)
     {
@@ -599,12 +601,15 @@ public class WorkloadOrchestrator
         var batchResult = new BatchWorkloadResult { WorkloadResults = results };
 
         // Use configuration values if parameters not provided
-        var effectiveProjectPath = projectPath ?? _workloadConfig.ProjectPath;
         var effectiveSolutionPath = solutionPath ?? _workloadConfig.SolutionPath;
+        var effectiveIgnoreProjects = ignoreProjects ?? _workloadConfig.IgnoreProjects;
 
         _logger.LogInformation("Starting code cleanup for repository {RepositoryUrl}", repositoryUrl);
-        _logger.LogInformation("Using project path: {ProjectPath}", effectiveProjectPath);
         _logger.LogInformation("Using solution path: {SolutionPath}", effectiveSolutionPath);
+        if (effectiveIgnoreProjects.Count > 0)
+        {
+            _logger.LogInformation("Ignoring projects: {IgnoreProjects}", string.Join(", ", effectiveIgnoreProjects));
+        }
 
         // Variables for database tracking and workload execution
         WorkloadRunRecord? runRecord = null;
@@ -701,7 +706,7 @@ public class WorkloadOrchestrator
                 repositoryPath,
                 repoConfig,
                 "codeclean",
-                effectiveProjectPath,
+                effectiveIgnoreProjects,
                 cancellationToken);
 
             if (!allFilesToClean.Any())
@@ -742,7 +747,6 @@ public class WorkloadOrchestrator
                 var workload = new CodeCleanupWorkload
                 {
                     RepositoryUrl = repositoryUrl,
-                    ProjectPath = effectiveProjectPath,
                     SolutionPath = effectiveSolutionPath,
                     FilePath = filePath,
                     Options = _workloadConfig.CodeCleanup.Options

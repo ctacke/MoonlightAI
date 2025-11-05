@@ -11,11 +11,6 @@ public class CodeCleanupWorkload : Workload
     public string SolutionPath { get; set; } = string.Empty;
 
     /// <summary>
-    /// Path to the project file (relative to repository root).
-    /// </summary>
-    public string ProjectPath { get; set; } = string.Empty;
-
-    /// <summary>
     /// Path to the specific C# file to clean up (relative to repository root).
     /// </summary>
     public string FilePath { get; set; } = string.Empty;

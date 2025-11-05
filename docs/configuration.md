@@ -63,7 +63,10 @@ Before running MoonlightAI, ensure you've configured:
     "MaxBuildRetries": 2,
     "RevertOnBuildFailure": true,
     "SolutionPath": "MySolution.sln",
-    "ProjectPath": "src/MyProject",
+    "IgnoreProjects": [
+      "MyProject.Tests.csproj",
+      "Benchmark.csproj"
+    ],
     "CodeDocumentation": {
       "DocumentVisibility": "Public"
     },
@@ -342,7 +345,10 @@ These settings apply to all workload types and are shared across Code Documentat
     "MaxBuildRetries": 2,
     "RevertOnBuildFailure": true,
     "SolutionPath": "MySolution.sln",
-    "ProjectPath": "src/MyProject"
+    "IgnoreProjects": [
+      "MyProject.Tests.csproj",
+      "Benchmark.csproj"
+    ]
   }
 }
 ```
@@ -354,17 +360,17 @@ These settings apply to all workload types and are shared across Code Documentat
 | `MaxBuildRetries` | AI fix attempts | `2` | 0-10 |
 | `RevertOnBuildFailure` | Revert unfixable files | `true` | true/false |
 | `SolutionPath` | Path to solution file for build validation | None | string (relative to repository root) |
-| `ProjectPath` | Path to project directory to process | None | string (relative to repository root) |
+| `IgnoreProjects` | Project files to exclude from processing | `[]` (empty) | array of strings (project filenames) |
 
-**Shared Paths:**
+**Project Filtering:**
 
-The `SolutionPath` and `ProjectPath` are configured once at the Workload level and used by all workload types (Code Documentation and Code Cleanup). This ensures consistency and avoids duplication.
+By default, **all projects in the solution are processed**. Use `IgnoreProjects` to exclude specific projects you don't want MoonlightAI to modify.
 
-**Path Guidelines:**
-- Paths are relative to the repository root
-- Use forward slashes: `src/MyProject` not `src\MyProject`
-- `SolutionPath` points to your `.sln` or `.slnx` file for build validation
-- `ProjectPath` points to the specific project directory to process
+**Configuration Guidelines:**
+- `SolutionPath` is relative to the repository root
+- Use forward slashes: `src/MySolution.sln` not `src\MySolution.sln`
+- `IgnoreProjects` should contain just the project filename (e.g., `"MyApp.Tests.csproj"`)
+- Common projects to ignore: test projects, benchmarks, sample projects, tool projects
 
 **Batch Size Guidelines:**
 - **Small (1-5):** Safer, more granular PRs, slower
@@ -384,13 +390,13 @@ The `SolutionPath` and `ProjectPath` are configured once at the Workload level a
 
 ### Code Documentation Workload
 
-Configuration specific to the Code Documentation workload. Note that `SolutionPath` and `ProjectPath` are configured at the parent Workload level (see Global Workload Settings above).
+Configuration specific to the Code Documentation workload. Note that `SolutionPath` and `IgnoreProjects` are configured at the parent Workload level (see Global Workload Settings above).
 
 ```json
 {
   "Workload": {
     "SolutionPath": "MySolution.sln",
-    "ProjectPath": "src/MyProject",
+    "IgnoreProjects": ["MyProject.Tests.csproj"],
     "CodeDocumentation": {
       "DocumentVisibility": "Public"
     }
@@ -422,13 +428,13 @@ Comma-separated list of visibility levels:
 
 ### Code Cleanup Workload
 
-Configuration specific to the Code Cleanup workload. Note that `SolutionPath` and `ProjectPath` are configured at the parent Workload level (see Global Workload Settings above).
+Configuration specific to the Code Cleanup workload. Note that `SolutionPath` and `IgnoreProjects` are configured at the parent Workload level (see Global Workload Settings above).
 
 ```json
 {
   "Workload": {
     "SolutionPath": "MySolution.sln",
-    "ProjectPath": "src/MyProject",
+    "IgnoreProjects": ["MyProject.Tests.csproj"],
     "CodeCleanup": {
       "Options": {
         "RemoveUnusedVariables": true,

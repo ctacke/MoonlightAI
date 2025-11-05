@@ -36,7 +36,10 @@
     "MaxBuildRetries": 2,
     "RevertOnBuildFailure": true,
     "SolutionPath": "path/in/the/repo/to/mySolution.slnx",
-    "ProjectPath": "src/Engine/Modules/MQTT/SolutionEngine.MQTT.Module/SolutionEngine.MQTT.Module.csproj",
+    "IgnoreProjects": [
+      "MyProject.Tests.csproj",
+      "Benchmark.csproj"
+    ],
     "CodeDocumentation": {
       "DocumentVisibility": "Public"
     },

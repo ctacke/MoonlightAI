@@ -209,9 +209,9 @@ public class MoonlightTerminalUI : IDisposable
         var solutionPath = !string.IsNullOrEmpty(_workloadConfig.SolutionPath)
             ? ShortenPath(_workloadConfig.SolutionPath, 35)
             : "Not configured";
-        var projectPath = !string.IsNullOrEmpty(_workloadConfig.ProjectPath)
-            ? ShortenPath(_workloadConfig.ProjectPath, 35)
-            : "Not configured";
+        var ignoreProjects = _workloadConfig.IgnoreProjects.Count > 0
+            ? $"{_workloadConfig.IgnoreProjects.Count} project(s)"
+            : "None";
 
         // Left column: Configuration
         var leftColumn = $@"CONFIGURATION
@@ -219,7 +219,7 @@ Repository: {repoName}
 Model: {_aiConfig.ModelName}
 {(_containerConfig.UseLocalContainer ? "Container" : "Server")}: {containerStatus}
 Solution: {solutionPath}
-Project: {projectPath}
+Ignore Projects: {ignoreProjects}
 Batch Size: {_workloadConfig.BatchSize}
 Database: {dbPath}";
 

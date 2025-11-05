@@ -26,7 +26,7 @@ Generates XML documentation comments for public-scoped C# code using AI.
 {
   "Workload": {
     "SolutionPath": "MyProject.sln",
-    "ProjectPath": "src/MyProject",
+    "IgnoreProjects": ["MyProject.Tests.csproj"],
     "CodeDocumentation": {
       "DocumentVisibility": "Public"
     }
@@ -34,4 +34,4 @@ Generates XML documentation comments for public-scoped C# code using AI.
 }
 ```
 
-Note: `SolutionPath` and `ProjectPath` are configured at the parent Workload level and shared across all workload types. See [Configuration Guide](configuration.md) for details.
+Note: `SolutionPath` and `IgnoreProjects` are configured at the parent Workload level. By default, all projects in the solution are processed. See [Configuration Guide](configuration.md) for details.

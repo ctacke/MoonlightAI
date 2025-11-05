@@ -213,7 +213,7 @@ The Dockerfile uses the Ollama base image and pre-pulls the CodeLlama 13b-instru
 
 ### Workload Configuration
 
-Configure global workload settings and paths. **SolutionPath** and **ProjectPath** are shared across all workload types (Code Documentation and Code Cleanup).
+Configure global workload settings and paths. All projects in the solution are processed by default. Use **IgnoreProjects** to exclude specific projects.
 
 ```json
 {
@@ -223,7 +223,10 @@ Configure global workload settings and paths. **SolutionPath** and **ProjectPath
     "MaxBuildRetries": 2,
     "RevertOnBuildFailure": true,
     "SolutionPath": "src/SolutionEngine.slnx",
-    "ProjectPath": "src/Engine/Modules/MQTT/SolutionEngine.MQTT.Module/SolutionEngine.MQTT.Module.csproj",
+    "IgnoreProjects": [
+      "MyProject.Tests.csproj",
+      "Benchmark.csproj"
+    ],
     "CodeDocumentation": {
       "DocumentVisibility": "Public"
     },
@@ -251,9 +254,9 @@ Configure global workload settings and paths. **SolutionPath** and **ProjectPath
 - `MaxBuildRetries`: Number of times AI can retry fixing build errors (default: 2)
 - `RevertOnBuildFailure`: Revert files that fail build validation (default: true)
 - `SolutionPath`: Path to solution file (.sln/.slnx) for build validation, relative to repository root
-- `ProjectPath`: Path to project file (.csproj) to process, relative to repository root
+- `IgnoreProjects`: Array of project filenames to exclude (e.g., ["MyApp.Tests.csproj", "Benchmarks.csproj"])
 
-**Shared Paths**: The `SolutionPath` and `ProjectPath` are configured once at the Workload level and used by all workload types. This ensures consistency and avoids duplication across Code Documentation and Code Cleanup configurations.
+**Project Filtering**: By default, all projects in the solution are processed. Use `IgnoreProjects` to exclude test projects, benchmarks, or other projects you don't want MoonlightAI to modify.
 
 Environment-specific overrides can be placed in `appsettings.Development.json`.
 

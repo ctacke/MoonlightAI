@@ -358,8 +358,20 @@ public class GitManager : IGitManager
                 FetchOptions = fetchOptions
             };
 
-            Commands.Pull(repo, signature, pullOptions);
-            _logger.LogInformation("Successfully pulled latest changes");
+            try
+            {
+                Commands.Pull(repo, signature, pullOptions);
+                _logger.LogInformation("Successfully pulled latest changes");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "Unable to pull latest changes for {RepositoryPath}. " +
+                    $"{ex.Message}" +
+                    "Continuing with existing repository state. ",
+                    repositoryPath);
+                // Don't re-throw - continue with existing repository state to prevent app crash
+            }
         }
     }
 

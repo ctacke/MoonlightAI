@@ -41,10 +41,11 @@ public class WorkloadConfiguration
     public string SolutionPath { get; set; } = string.Empty;
 
     /// <summary>
-    /// Path to the specific project file (.csproj) to process.
-    /// This path is shared across all workload types.
+    /// List of project names to exclude from workload processing.
+    /// Specify just the project file name (e.g., "MyProject.Tests.csproj").
+    /// All projects in the solution are processed by default unless listed here.
     /// </summary>
-    public string ProjectPath { get; set; } = string.Empty;
+    public HashSet<string> IgnoreProjects { get; set; } = new();
 
     /// <summary>
     /// Configuration specific to Code Documentation workloads.

@@ -13,14 +13,14 @@ public interface IWorkloadScheduler
     /// <param name="repositoryPath">Path to the local repository.</param>
     /// <param name="repoConfig">Repository configuration.</param>
     /// <param name="workloadType">Type of workload to schedule.</param>
-    /// <param name="projectPath">Optional project path to limit scope.</param>
+    /// <param name="ignoreProjects">Optional set of project names to exclude from processing.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>List of file paths that need the specified workload.</returns>
     Task<List<string>> SelectFilesForWorkloadAsync(
         string repositoryPath,
         RepositoryConfiguration repoConfig,
         string workloadType,
-        string? projectPath = null,
+        HashSet<string>? ignoreProjects = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>
