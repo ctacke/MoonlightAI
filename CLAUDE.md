@@ -211,6 +211,50 @@ docker build -t moonlight-llm-server .
 
 The Dockerfile uses the Ollama base image and pre-pulls the CodeLlama 13b-instruct model.
 
+### Workload Configuration
+
+Configure global workload settings and paths. **SolutionPath** and **ProjectPath** are shared across all workload types (Code Documentation and Code Cleanup).
+
+```json
+{
+  "Workload": {
+    "BatchSize": 10,
+    "ValidateBuilds": true,
+    "MaxBuildRetries": 2,
+    "RevertOnBuildFailure": true,
+    "SolutionPath": "src/SolutionEngine.slnx",
+    "ProjectPath": "src/Engine/Modules/MQTT/SolutionEngine.MQTT.Module/SolutionEngine.MQTT.Module.csproj",
+    "CodeDocumentation": {
+      "DocumentVisibility": "Public"
+    },
+    "CodeCleanup": {
+      "Options": {
+        "RemoveUnusedVariables": true,
+        "RemoveUnusedUsings": true,
+        "ConvertPublicFieldsToProperties": true,
+        "ReorderPrivateFields": true,
+        "ExtractMagicNumbers": false,
+        "SimplifyBooleanExpressions": false,
+        "RemoveRedundantCode": false,
+        "SimplifyStringOperations": false,
+        "UseExpressionBodiedMembers": false,
+        "MaxOperationsPerRun": 1
+      }
+    }
+  }
+}
+```
+
+**Workload Configuration Options**:
+- `BatchSize`: Maximum number of files to modify per workload run (default: 10)
+- `ValidateBuilds`: Enable build validation after AI modifications (default: true)
+- `MaxBuildRetries`: Number of times AI can retry fixing build errors (default: 2)
+- `RevertOnBuildFailure`: Revert files that fail build validation (default: true)
+- `SolutionPath`: Path to solution file (.sln/.slnx) for build validation, relative to repository root
+- `ProjectPath`: Path to project file (.csproj) to process, relative to repository root
+
+**Shared Paths**: The `SolutionPath` and `ProjectPath` are configured once at the Workload level and used by all workload types. This ensures consistency and avoids duplication across Code Documentation and Code Cleanup configurations.
+
 Environment-specific overrides can be placed in `appsettings.Development.json`.
 
 ## Development Notes

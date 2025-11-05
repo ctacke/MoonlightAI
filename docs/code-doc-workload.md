@@ -25,13 +25,13 @@ Generates XML documentation comments for public-scoped C# code using AI.
 ```json
 {
   "Workload": {
+    "SolutionPath": "MyProject.sln",
+    "ProjectPath": "src/MyProject",
     "CodeDocumentation": {
-      "Enabled": true,
-      "ProjectPath": "src/MyProject",
-      "SolutionPath": "MyProject.sln",
-      "DocumentVisibility": "Public,Internal",
-      "MaxFilesPerRun": 10
+      "DocumentVisibility": "Public"
     }
   }
 }
 ```
+
+Note: `SolutionPath` and `ProjectPath` are configured at the parent Workload level and shared across all workload types. See [Configuration Guide](configuration.md) for details.

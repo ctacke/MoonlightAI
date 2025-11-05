@@ -470,3 +470,4 @@ FodyWeavers.xsd
 
 # MoonlightAI - Ollama model cache
 ollama-models/
+.claude/settings.local.json

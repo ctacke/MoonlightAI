@@ -206,14 +206,21 @@ public class MoonlightTerminalUI : IDisposable
             ? ShortenPath(_containerConfig.ModelsPath, 30)
             : "N/A";
         var dbPath = ShortenPath(_databaseConfig.DatabasePath, 30);
+        var solutionPath = !string.IsNullOrEmpty(_workloadConfig.SolutionPath)
+            ? ShortenPath(_workloadConfig.SolutionPath, 35)
+            : "Not configured";
+        var projectPath = !string.IsNullOrEmpty(_workloadConfig.ProjectPath)
+            ? ShortenPath(_workloadConfig.ProjectPath, 35)
+            : "Not configured";
 
         // Left column: Configuration
         var leftColumn = $@"CONFIGURATION
 Repository: {repoName}
 Model: {_aiConfig.ModelName}
 {(_containerConfig.UseLocalContainer ? "Container" : "Server")}: {containerStatus}
+Solution: {solutionPath}
+Project: {projectPath}
 Batch Size: {_workloadConfig.BatchSize}
-Models: {modelsPath}
 Database: {dbPath}";
 
         // Right column: Statistics

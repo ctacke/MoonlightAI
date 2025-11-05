@@ -62,22 +62,24 @@ Before running MoonlightAI, ensure you've configured:
     "ValidateBuilds": true,
     "MaxBuildRetries": 2,
     "RevertOnBuildFailure": true,
+    "SolutionPath": "MySolution.sln",
+    "ProjectPath": "src/MyProject",
     "CodeDocumentation": {
-      "Enabled": true,
-      "ProjectPath": "src/MyProject",
-      "SolutionPath": "MySolution.sln",
-      "DocumentVisibility": "Public,Internal",
-      "MaxFilesPerRun": 50
+      "DocumentVisibility": "Public"
     },
     "CodeCleanup": {
-      "Enabled": true,
-      "ProjectPath": "src/MyProject",
-      "SolutionPath": "MySolution.sln",
-      "Operations": [
-        "RemoveUnusedVariables",
-        "RemoveUnusedUsings",
-        "ConvertFieldsToProperties"
-      ]
+      "Options": {
+        "RemoveUnusedVariables": true,
+        "RemoveUnusedUsings": true,
+        "ConvertPublicFieldsToProperties": true,
+        "ReorderPrivateFields": true,
+        "ExtractMagicNumbers": false,
+        "SimplifyBooleanExpressions": false,
+        "RemoveRedundantCode": false,
+        "SimplifyStringOperations": false,
+        "UseExpressionBodiedMembers": false,
+        "MaxOperationsPerRun": 1
+      }
     }
   },
   "Database": {
@@ -330,23 +332,39 @@ Configure behavior and settings for workloads.
 
 ### Global Workload Settings
 
+These settings apply to all workload types and are shared across Code Documentation and Code Cleanup workloads.
+
 ```json
 {
   "Workload": {
     "BatchSize": 10,
     "ValidateBuilds": true,
     "MaxBuildRetries": 2,
-    "RevertOnBuildFailure": true
+    "RevertOnBuildFailure": true,
+    "SolutionPath": "MySolution.sln",
+    "ProjectPath": "src/MyProject"
   }
 }
 ```
 
-| Setting | Description | Default | Range |
-|---------|-------------|---------|-------|
+| Setting | Description | Default | Range/Type |
+|---------|-------------|---------|------------|
 | `BatchSize` | Files per batch | `10` | 1-100 |
 | `ValidateBuilds` | Enable build validation | `true` | true/false |
 | `MaxBuildRetries` | AI fix attempts | `2` | 0-10 |
 | `RevertOnBuildFailure` | Revert unfixable files | `true` | true/false |
+| `SolutionPath` | Path to solution file for build validation | None | string (relative to repository root) |
+| `ProjectPath` | Path to project directory to process | None | string (relative to repository root) |
+
+**Shared Paths:**
+
+The `SolutionPath` and `ProjectPath` are configured once at the Workload level and used by all workload types (Code Documentation and Code Cleanup). This ensures consistency and avoids duplication.
+
+**Path Guidelines:**
+- Paths are relative to the repository root
+- Use forward slashes: `src/MyProject` not `src\MyProject`
+- `SolutionPath` points to your `.sln` or `.slnx` file for build validation
+- `ProjectPath` points to the specific project directory to process
 
 **Batch Size Guidelines:**
 - **Small (1-5):** Safer, more granular PRs, slower
@@ -366,15 +384,15 @@ Configure behavior and settings for workloads.
 
 ### Code Documentation Workload
 
+Configuration specific to the Code Documentation workload. Note that `SolutionPath` and `ProjectPath` are configured at the parent Workload level (see Global Workload Settings above).
+
 ```json
 {
   "Workload": {
+    "SolutionPath": "MySolution.sln",
+    "ProjectPath": "src/MyProject",
     "CodeDocumentation": {
-      "Enabled": true,
-      "ProjectPath": "src/MyProject",
-      "SolutionPath": "MySolution.sln",
-      "DocumentVisibility": "Public,Internal",
-      "MaxFilesPerRun": 50
+      "DocumentVisibility": "Public"
     }
   }
 }
@@ -382,11 +400,7 @@ Configure behavior and settings for workloads.
 
 | Setting | Description | Default | Required |
 |---------|-------------|---------|----------|
-| `Enabled` | Enable this workload | `true` | ✅ Yes |
-| `ProjectPath` | Path to project directory | None | ✅ Yes |
-| `SolutionPath` | Path to .sln file | None | ✅ Yes |
-| `DocumentVisibility` | Which members to document | `"Public,Internal"` | ✅ Yes |
-| `MaxFilesPerRun` | Max files per batch | `50` | No |
+| `DocumentVisibility` | Which members to document | `"Public"` | ✅ Yes |
 
 **Document Visibility Options:**
 
@@ -399,49 +413,35 @@ Comma-separated list of visibility levels:
 - `PrivateProtected` - Private protected
 
 **Common combinations:**
-- `"Public"` - Public API only
-- `"Public,Internal"` - Public and internal (recommended)
+- `"Public"` - Public API only (default)
+- `"Public,Internal"` - Public and internal (recommended for libraries)
 - `"Public,Internal,Protected"` - Include protected
 - `"Public,Internal,Protected,Private"` - Document everything
-
-**Path Examples:**
-
-```json
-// Single project at root
-"ProjectPath": "src/MyProject",
-"SolutionPath": "MyProject.sln"
-
-// Nested structure
-"ProjectPath": "src/MyCompany.MyProject",
-"SolutionPath": "src/MyCompany.sln"
-
-// Multiple projects (process one at a time)
-"ProjectPath": "src/Core",
-"SolutionPath": "MyCompany.sln"
-```
 
 ---
 
 ### Code Cleanup Workload
 
+Configuration specific to the Code Cleanup workload. Note that `SolutionPath` and `ProjectPath` are configured at the parent Workload level (see Global Workload Settings above).
+
 ```json
 {
   "Workload": {
+    "SolutionPath": "MySolution.sln",
+    "ProjectPath": "src/MyProject",
     "CodeCleanup": {
-      "Enabled": true,
-      "ProjectPath": "src/MyProject",
-      "SolutionPath": "MySolution.sln",
-      "Operations": [
-        "RemoveUnusedVariables",
-        "RemoveUnusedUsings",
-        "ConvertFieldsToProperties",
-        "ReorderPrivateFields",
-        "ExtractMagicNumbers",
-        "SimplifyBooleanExpressions",
-        "RemoveRedundantCode",
-        "SimplifyStringOperations",
-        "UseExpressionBodiedMembers"
-      ]
+      "Options": {
+        "RemoveUnusedVariables": true,
+        "RemoveUnusedUsings": true,
+        "ConvertPublicFieldsToProperties": true,
+        "ReorderPrivateFields": true,
+        "ExtractMagicNumbers": false,
+        "SimplifyBooleanExpressions": false,
+        "RemoveRedundantCode": false,
+        "SimplifyStringOperations": false,
+        "UseExpressionBodiedMembers": false,
+        "MaxOperationsPerRun": 1
+      }
     }
   }
 }
@@ -449,10 +449,7 @@ Comma-separated list of visibility levels:
 
 | Setting | Description | Default | Required |
 |---------|-------------|---------|----------|
-| `Enabled` | Enable this workload | `true` | ✅ Yes |
-| `ProjectPath` | Path to project directory | None | ✅ Yes |
-| `SolutionPath` | Path to .sln file | None | ✅ Yes |
-| `Operations` | Cleanup operations to perform | All | ✅ Yes |
+| `Options` | Cleanup operation flags | See below | ✅ Yes |
 
 **Available Operations:**
 
@@ -473,13 +470,22 @@ Comma-separated list of visibility levels:
 - **Medium:** Changes behavior structure but not logic
 - **High:** May change logic (none currently available)
 
-**Recommended starting operations (safest):**
+**Recommended starting configuration (safest operations only):**
 ```json
-"Operations": [
-  "RemoveUnusedVariables",
-  "RemoveUnusedUsings",
-  "ReorderPrivateFields"
-]
+"CodeCleanup": {
+  "Options": {
+    "RemoveUnusedVariables": true,
+    "RemoveUnusedUsings": true,
+    "ReorderPrivateFields": true,
+    "ConvertPublicFieldsToProperties": false,
+    "ExtractMagicNumbers": false,
+    "SimplifyBooleanExpressions": false,
+    "RemoveRedundantCode": false,
+    "SimplifyStringOperations": false,
+    "UseExpressionBodiedMembers": false,
+    "MaxOperationsPerRun": 1
+  }
+}
 ```
 
 ---

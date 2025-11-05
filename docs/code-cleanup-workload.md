@@ -17,14 +17,24 @@ Performs automated refactoring and code quality improvements.
 ```json
 {
   "Workload": {
+    "SolutionPath": "MyProject.sln",
+    "ProjectPath": "src/MyProject",
     "CodeCleanup": {
-      "Enabled": true,
-      "Operations": [
-        "RemoveUnusedVariables",
-        "RemoveUnusedUsings",
-        "ConvertFieldsToProperties"
-      ]
+      "Options": {
+        "RemoveUnusedVariables": true,
+        "RemoveUnusedUsings": true,
+        "ConvertPublicFieldsToProperties": true,
+        "ReorderPrivateFields": false,
+        "ExtractMagicNumbers": false,
+        "SimplifyBooleanExpressions": false,
+        "RemoveRedundantCode": false,
+        "SimplifyStringOperations": false,
+        "UseExpressionBodiedMembers": false,
+        "MaxOperationsPerRun": 1
+      }
     }
   }
 }
 ```
+
+Note: `SolutionPath` and `ProjectPath` are configured at the parent Workload level and shared across all workload types. See [Configuration Guide](configuration.md) for details.

@@ -35,6 +35,18 @@ public class WorkloadConfiguration
     public bool RevertOnBuildFailure { get; set; } = true;
 
     /// <summary>
+    /// Path to the solution file (.sln or .slnx) for build validation.
+    /// This path is shared across all workload types.
+    /// </summary>
+    public string SolutionPath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Path to the specific project file (.csproj) to process.
+    /// This path is shared across all workload types.
+    /// </summary>
+    public string ProjectPath { get; set; } = string.Empty;
+
+    /// <summary>
     /// Configuration specific to Code Documentation workloads.
     /// </summary>
     public CodeDocWorkloadConfiguration CodeDocumentation { get; set; } = new();

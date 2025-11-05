@@ -247,10 +247,16 @@ public class GitManager : IGitManager
     {
         try
         {
-            _logger.LogInformation("Creating pull request for branch {BranchName} in {Owner}/{Name}...", branchName, repository.Owner, repository.Name);
-            _logger.LogInformation("PR Details - Head: {Head}, Base: {Base}, Title: {Title}", branchName, _config.DefaultBranch, title);
+            // Get the actual default branch from GitHub API
+            _logger.LogInformation("Fetching repository default branch for {Owner}/{Name}...", repository.Owner, repository.Name);
+            var repoInfo = await _githubClient.Repository.Get(repository.Owner, repository.Name);
+            var baseBranch = repoInfo.DefaultBranch;
 
-            var newPr = new NewPullRequest(title, branchName, _config.DefaultBranch)
+            _logger.LogInformation("Repository default branch is: {DefaultBranch}", baseBranch);
+            _logger.LogInformation("Creating pull request for branch {BranchName} in {Owner}/{Name}...", branchName, repository.Owner, repository.Name);
+            _logger.LogInformation("PR Details - Head: {Head}, Base: {Base}, Title: {Title}", branchName, baseBranch, title);
+
+            var newPr = new NewPullRequest(title, branchName, baseBranch)
             {
                 Body = body
             };
@@ -264,7 +270,6 @@ public class GitManager : IGitManager
         {
             _logger.LogError("GitHub API validation failed for PR creation:");
             _logger.LogError("  Branch: {Branch}", branchName);
-            _logger.LogError("  Base: {Base}", _config.DefaultBranch);
             _logger.LogError("  Repo: {Owner}/{Name}", repository.Owner, repository.Name);
             _logger.LogError("  Message: {Message}", validationEx.Message);
             if (validationEx.ApiError?.Errors != null)

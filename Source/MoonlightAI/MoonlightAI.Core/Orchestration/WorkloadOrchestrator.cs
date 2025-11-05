@@ -221,8 +221,8 @@ public class WorkloadOrchestrator
         var batchResult = new BatchWorkloadResult { WorkloadResults = results };
 
         // Use configuration values if parameters not provided
-        var effectiveProjectPath = projectPath ?? _workloadConfig.CodeDocumentation.ProjectPath;
-        var effectiveSolutionPath = solutionPath ?? _workloadConfig.CodeDocumentation.SolutionPath;
+        var effectiveProjectPath = projectPath ?? _workloadConfig.ProjectPath;
+        var effectiveSolutionPath = solutionPath ?? _workloadConfig.SolutionPath;
 
         _logger.LogInformation("Starting code documentation for repository {RepositoryUrl}", repositoryUrl);
         _logger.LogInformation("Using project path: {ProjectPath}", effectiveProjectPath);
@@ -599,8 +599,8 @@ public class WorkloadOrchestrator
         var batchResult = new BatchWorkloadResult { WorkloadResults = results };
 
         // Use configuration values if parameters not provided
-        var effectiveProjectPath = projectPath ?? _workloadConfig.CodeCleanup.ProjectPath;
-        var effectiveSolutionPath = solutionPath ?? _workloadConfig.CodeCleanup.SolutionPath;
+        var effectiveProjectPath = projectPath ?? _workloadConfig.ProjectPath;
+        var effectiveSolutionPath = solutionPath ?? _workloadConfig.SolutionPath;
 
         _logger.LogInformation("Starting code cleanup for repository {RepositoryUrl}", repositoryUrl);
         _logger.LogInformation("Using project path: {ProjectPath}", effectiveProjectPath);
