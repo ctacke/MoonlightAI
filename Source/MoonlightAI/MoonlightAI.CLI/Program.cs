@@ -158,7 +158,7 @@ ui.CommandEntered += async (sender, command) =>
 
 // Show welcome message
 ui.AppendLog("═══════════════════════════════════════════════════════════════");
-ui.AppendLog("  MoonlightAI - AI-Powered Code Documentation");
+ui.AppendLog("  MoonlightAI - Your AI-Powered Code Assistant");
 ui.AppendLog("═══════════════════════════════════════════════════════════════");
 ui.AppendLog("");
 ui.AppendLog("Available Commands:");
@@ -631,7 +631,7 @@ static async Task DisplayStatisticsAsync(MoonlightTerminalUI ui, ServiceProvider
 }
 
 // Helper class to hold cancellation token source
-class WorkloadCancellationHolder
+internal class WorkloadCancellationHolder
 {
     public CancellationTokenSource? CancellationTokenSource { get; set; }
 }

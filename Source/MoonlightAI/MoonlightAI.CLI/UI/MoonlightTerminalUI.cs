@@ -54,7 +54,7 @@ public class MoonlightTerminalUI : IDisposable
         Application.Init();
 
         // Create main window
-        _mainWindow = new Window("MoonlightAI - AI-Powered Code Documentation")
+        _mainWindow = new Window("MoonlightAI - Your AI-Powered Code Assistant")
         {
             X = 0,
             Y = 0,

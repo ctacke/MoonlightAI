@@ -108,7 +108,7 @@ You should see the MoonlightAI terminal UI:
 
 ```
 ═══════════════════════════════════════════════════════════════
-  MoonlightAI - AI-Powered Code Documentation
+  MoonlightAI - Your AI-Powered Code Assistant
 ═══════════════════════════════════════════════════════════════
 
 Available Commands:

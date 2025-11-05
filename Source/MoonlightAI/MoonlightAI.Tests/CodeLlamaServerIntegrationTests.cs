@@ -1,7 +1,9 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using MoonlightAI.Core;
 using MoonlightAI.Core.Configuration;
+using MoonlightAI.Core.Prompts;
 using MoonlightAI.Core.Servers;
 
 namespace MoonlightAI.Tests;
@@ -27,10 +29,21 @@ public class CodeLlamaServerIntegrationTests : IDisposable
         // Configure services
         var services = new ServiceCollection();
 
+        // Add logging
+        services.AddLogging(builder => builder.AddConsole());
+
         // Bind AI Server configuration
         _config = new AIServerConfiguration();
         configuration.GetSection(AIServerConfiguration.SectionName).Bind(_config);
         services.AddSingleton(_config);
+
+        // Bind and register Prompt configuration (required by CodeLlamaServer)
+        var promptConfig = new PromptConfiguration();
+        configuration.GetSection(PromptConfiguration.SectionName).Bind(promptConfig);
+        services.AddSingleton(promptConfig);
+
+        // Register PromptService (required by CodeLlamaServer)
+        services.AddSingleton<PromptService>();
 
         // Register HttpClient and AI Server
         services.AddHttpClient<IAIServer, CodeLlamaServer>();
